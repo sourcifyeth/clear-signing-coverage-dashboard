@@ -45,6 +45,7 @@ export interface PracticalReport {
       practicePct: number;
     };
     problems: PracticalProblem[];
+    examples: { hash: string; entity?: string; functionSig?: string; toAddress: string }[];
     warningCodeTotals: Record<string, number>;
   };
 }

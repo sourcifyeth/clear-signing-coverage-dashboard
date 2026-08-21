@@ -261,6 +261,148 @@ body {
   gap: 8px;
 }
 
+/* inspector */
+.inspectRow {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.inspectInput {
+  flex: 1;
+  background: #0b1120;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 13px;
+}
+.inspectInput:focus {
+  outline: none;
+  border-color: #334155;
+}
+.btn {
+  background: var(--accent);
+  color: #0b1120;
+  border: none;
+  border-radius: 8px;
+  padding: 0 18px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.chip {
+  background: #0b1120;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.chip:hover {
+  border-color: #334155;
+}
+.inspectError {
+  color: #f87171;
+  margin-top: 8px;
+}
+.decode {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+.decodeHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.decodeHead .tag {
+  background: transparent;
+  font-size: 13px;
+}
+.decodeHead a {
+  color: #93c5fd;
+  text-decoration: none;
+}
+.intent {
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.interp {
+  font-size: 14px;
+  color: #cbd5e1;
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fieldGroup {
+  border-left: 2px solid var(--border);
+  padding-left: 12px;
+  margin: 6px 0;
+}
+.fieldGroupLabel {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.fieldRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+  border-bottom: 1px solid #141c2e;
+}
+.fieldLabel {
+  font-size: 13px;
+}
+.fieldValue {
+  font-size: 13px;
+  text-align: right;
+  word-break: break-all;
+  max-width: 60%;
+}
+.rawFallback {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.raw {
+  color: #94a3b8;
+  word-break: break-all;
+}
+.warnings {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.warnRow {
+  color: #fbbf24;
+}
+.warnCode {
+  background: #2a1f06;
+  border-radius: 4px;
+  padding: 0 5px;
+  margin-right: 6px;
+}
+
 footer {
   text-align: center;
   padding-top: 8px;

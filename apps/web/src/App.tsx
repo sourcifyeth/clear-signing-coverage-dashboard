@@ -11,6 +11,7 @@ import {
 } from "recharts";
 import type { Report, PracticalReport } from "./types.ts";
 import { labelFor } from "./labels.ts";
+import { TxInspector } from "./TxInspector.tsx";
 
 const fmtInt = (n: number) => n.toLocaleString("en-US");
 const fmtPct = (n: number) => `${n.toFixed(1)}%`;
@@ -87,6 +88,7 @@ function Dashboard({
   const r = report.report;
   const b = r.buckets;
   const total = r.totalTx;
+  const [seedHash, setSeedHash] = useState<string | undefined>(undefined);
 
   const signable =
     b.covered_theory +
@@ -228,8 +230,11 @@ function Dashboard({
         </div>
       </section>
 
+      {/* Live decode */}
+      <TxInspector examples={practical?.report.examples ?? []} seed={seedHash} />
+
       {/* Theory vs practice */}
-      {practical && <PracticalPanel practical={practical} />}
+      {practical && <PracticalPanel practical={practical} onInspect={setSeedHash} />}
 
       {/* Cumulative chart */}
       <section className="card">
@@ -331,7 +336,13 @@ function numOr(n: number) {
   return Number.isFinite(n) ? n : "—";
 }
 
-function PracticalPanel({ practical }: { practical: PracticalReport }) {
+function PracticalPanel({
+  practical,
+  onInspect,
+}: {
+  practical: PracticalReport;
+  onInspect: (hash: string) => void;
+}) {
   const p = practical.report;
   const c = p.counts;
   const w = practical.sampleWindow;
@@ -405,6 +416,18 @@ function PracticalPanel({ practical }: { practical: PracticalReport }) {
                     </>
                   ) : (
                     "—"
+                  )}
+                  {pr.sampleTxHash && (
+                    <button
+                      className="chip"
+                      style={{ marginTop: 6 }}
+                      onClick={() => {
+                        onInspect(pr.sampleTxHash);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                    >
+                      decode sample ↑
+                    </button>
                   )}
                 </td>
               </tr>

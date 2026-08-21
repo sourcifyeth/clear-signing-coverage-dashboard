@@ -46,6 +46,8 @@ export interface PracticalReport {
   };
   /** groups that did not fully pass, worst (highest tx volume) first */
   problems: PracticalResult[];
+  /** a few high-volume passing samples, as ready demos for the live inspector */
+  examples: { hash: string; entity?: string; functionSig?: string; toAddress: string }[];
   warningCodeTotals: Record<string, number>;
 }
 
@@ -150,12 +152,24 @@ export async function runPractical(opts: {
     .filter((r) => r.status !== "pass")
     .sort((a, b) => b.txCount - a.txCount);
 
+  const examples = results
+    .filter((r) => r.status === "pass")
+    .sort((a, b) => b.txCount - a.txCount)
+    .slice(0, 8)
+    .map((r) => ({
+      hash: r.sampleTxHash,
+      entity: r.entity,
+      functionSig: r.functionSig,
+      toAddress: r.toAddress,
+    }));
+
   return {
     chainId,
     sampledGroups: results.length,
     counts,
     txWeighted: { ...tx, practicePct },
     problems,
+    examples,
     warningCodeTotals,
   };
 }
