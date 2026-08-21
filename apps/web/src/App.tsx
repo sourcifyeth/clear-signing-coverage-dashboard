@@ -281,7 +281,7 @@ function Dashboard({ report, state }: { report: Report; state: ToggleState }) {
                     {c.topSelectors.map((s) => (
                       <a
                         key={s.selector}
-                        href={`https://www.4byte.directory/signatures/?bytes4_signature=${s.selector}`}
+                        href={`https://4byte.sourcify.dev/?q=${s.selector}`}
                         target="_blank"
                         rel="noreferrer"
                         title={`${fmtInt(s.txCount)} txs`}
