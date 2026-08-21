@@ -29,16 +29,18 @@ in the plan (kept outside this repo).
 packages/
   coverage/   Stage A — build the (chainId, address, selector) coverage set
               from a local registry checkout.
-  worker/     Stage B — aggregate a timeframe of mainnet txs from BigQuery,
-              classify each (to, selector) group against the coverage set, and
-              rank the contracts needed to reach 80% / 95%.
+  worker/     Stages B + C. B aggregates a timeframe of mainnet txs from
+              BigQuery, classifies each (to, selector) group against the
+              coverage set, and ranks the contracts needed to reach 80% / 95%.
+              C runs the Sourcify library on a sample tx per covered group to
+              check it renders in practice (theory-vs-practice gap).
   api/        Read-only Express server over the out/ report snapshots.
 apps/
   web/        Vite + React dashboard.
 ```
 
-Stage C (practical run of the Sourcify library) and persistence (Postgres,
-per-tx index, scheduler) are not built yet — the API reads JSON snapshots from
+Persistence (Postgres, the 7-day per-tx index, scheduler) and the per-tx
+browser live-decode are not built yet — the API reads JSON snapshots from
 `out/` for now.
 
 ## Run the dashboard
@@ -50,7 +52,11 @@ npm install
 GCP_PROJECT_ID=... GOOGLE_APPLICATION_CREDENTIALS=/path/key.json \
   npm run stage-b -- --hours 24 --out out/report-24h.json
 
-# 2. Start the API (serves out/*.json) and the web app.
+# 2. (optional) Run the practical check — the Sourcify library on covered groups.
+GCP_PROJECT_ID=... GOOGLE_APPLICATION_CREDENTIALS=/path/key.json \
+  npm run stage-c -- --sample-hours 6 --out out/practical.json
+
+# 3. Start the API (serves out/*.json) and the web app.
 npm run api          # http://localhost:8787
 npm run web          # http://localhost:5273  (proxies /api to the API)
 ```
