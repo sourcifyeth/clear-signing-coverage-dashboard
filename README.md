@@ -29,10 +29,35 @@ in the plan (kept outside this repo).
 packages/
   coverage/   Stage A — build the (chainId, address, selector) coverage set
               from a local registry checkout.
+  worker/     Stage B — aggregate a timeframe of mainnet txs from BigQuery,
+              classify each (to, selector) group against the coverage set, and
+              rank the contracts needed to reach 80% / 95%.
+  api/        Read-only Express server over the out/ report snapshots.
+apps/
+  web/        Vite + React dashboard.
 ```
 
-Stages B (BigQuery aggregation), C (practical run), and D (API + React UI) are
-not built yet.
+Stage C (practical run of the Sourcify library) and persistence (Postgres,
+per-tx index, scheduler) are not built yet — the API reads JSON snapshots from
+`out/` for now.
+
+## Run the dashboard
+
+```bash
+npm install
+
+# 1. Generate a report snapshot (needs BigQuery credentials, see .env.example).
+GCP_PROJECT_ID=... GOOGLE_APPLICATION_CREDENTIALS=/path/key.json \
+  npm run stage-b -- --hours 24 --out out/report-24h.json
+
+# 2. Start the API (serves out/*.json) and the web app.
+npm run api          # http://localhost:8787
+npm run web          # http://localhost:5273  (proxies /api to the API)
+```
+
+Stage B prints the headline coverage and the ranked backlog, and writes the full
+report to the `--out` file. A `--dry-run` flag reports the BigQuery bytes a run
+would scan without executing it.
 
 ## Stage A — build the coverage set
 
