@@ -1,0 +1,17 @@
+{
+  "name": "@ccd/coverage",
+  "version": "0.0.0",
+  "description": "Stage A: build the ERC-7730 clear-signing coverage set (chainId, address, selector) from a local registry checkout.",
+  "type": "module",
+  "bin": {
+    "build-coverage": "./src/cli.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build-coverage": "tsx src/cli.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "js-sha3": "^0.9.3"
+  }
+}

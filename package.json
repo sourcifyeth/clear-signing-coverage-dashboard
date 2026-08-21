@@ -1,0 +1,17 @@
+{
+  "name": "clear-signing-coverage-dashboard",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Dashboard measuring what share of Ethereum transactions can be clear-signed with ERC-7730 descriptors, and which contracts to add next to reach 80% / 95% coverage.",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
