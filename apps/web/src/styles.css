@@ -1,0 +1,274 @@
+:root {
+  --bg: #0b1120;
+  --card: #0f172a;
+  --border: #1e293b;
+  --text: #e2e8f0;
+  --muted: #64748b;
+  --accent: #4ade80;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.wrap {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.muted {
+  color: var(--muted);
+}
+.small {
+  font-size: 13px;
+}
+
+/* header */
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.head h1 {
+  margin: 0 0 4px;
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+.sub {
+  margin: 0;
+  max-width: 520px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.meta {
+  font-size: 13px;
+  display: grid;
+  gap: 4px;
+  text-align: right;
+}
+.meta .muted {
+  display: inline-block;
+  min-width: 88px;
+}
+
+/* cards */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 22px;
+}
+.card h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.error {
+  border-color: #7f1d1d;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+@media (max-width: 760px) {
+  .grid2 {
+    grid-template-columns: 1fr;
+  }
+  .head {
+    flex-direction: column;
+  }
+  .meta {
+    text-align: left;
+  }
+}
+
+/* hero */
+.hero {
+  display: flex;
+  flex-direction: column;
+}
+.heroNum {
+  font-size: 60px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--accent);
+  line-height: 1;
+}
+.heroLabel {
+  font-size: 15px;
+  color: var(--text);
+  margin-top: 6px;
+  margin-bottom: 16px;
+}
+.toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #0b1120;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s, opacity 0.15s;
+}
+.toggle:disabled {
+  cursor: default;
+}
+.toggle:not(.on) {
+  opacity: 0.55;
+}
+.toggle.on {
+  border-color: #334155;
+}
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+/* reach */
+.reachRow {
+  display: flex;
+  gap: 28px;
+  margin-bottom: 8px;
+}
+.reachNum {
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.reachLabel {
+  font-size: 13px;
+  color: var(--muted);
+}
+.denoms {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+.statBox {
+  flex: 1;
+  min-width: 120px;
+  background: #0b1120;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.statVal {
+  font-size: 18px;
+  font-weight: 600;
+}
+.statLbl {
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+/* bucket bar */
+.bar {
+  display: flex;
+  height: 26px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.barSeg {
+  height: 100%;
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* table */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.tbl th,
+.tbl td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.tbl th {
+  color: var(--muted);
+  font-weight: 500;
+}
+.tbl .r {
+  text-align: right;
+}
+.tbl a {
+  color: #93c5fd;
+  text-decoration: none;
+}
+.tbl a:hover {
+  text-decoration: underline;
+}
+.tag {
+  display: inline-block;
+  background: #172033;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 6px;
+  margin-right: 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+.sels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+footer {
+  text-align: center;
+  padding-top: 8px;
+}
+code {
+  background: #0b1120;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-size: 12px;
+}
