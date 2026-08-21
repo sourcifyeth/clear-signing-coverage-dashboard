@@ -9,7 +9,7 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from "recharts";
-import type { Report } from "./types.ts";
+import type { Report, PracticalReport } from "./types.ts";
 import { labelFor } from "./labels.ts";
 
 const fmtInt = (n: number) => n.toLocaleString("en-US");
@@ -26,6 +26,7 @@ const BUCKETS = [
 
 export function App() {
   const [report, setReport] = useState<Report | null>(null);
+  const [practical, setPractical] = useState<PracticalReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [countEth, setCountEth] = useState(true);
   const [countToken, setCountToken] = useState(true);
@@ -35,6 +36,11 @@ export function App() {
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`API ${r.status}`))))
       .then(setReport)
       .catch((e) => setError(e.message));
+    // Practical run is optional — ignore if not generated yet.
+    fetch("/api/practical/latest")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setPractical)
+      .catch(() => setPractical(null));
   }, []);
 
   if (error) {
@@ -53,7 +59,13 @@ export function App() {
   }
   if (!report) return <div className="wrap muted">Loading…</div>;
 
-  return <Dashboard report={report} state={{ countEth, countToken, setCountEth, setCountToken }} />;
+  return (
+    <Dashboard
+      report={report}
+      practical={practical}
+      state={{ countEth, countToken, setCountEth, setCountToken }}
+    />
+  );
 }
 
 interface ToggleState {
@@ -63,7 +75,15 @@ interface ToggleState {
   setCountToken: (v: boolean) => void;
 }
 
-function Dashboard({ report, state }: { report: Report; state: ToggleState }) {
+function Dashboard({
+  report,
+  practical,
+  state,
+}: {
+  report: Report;
+  practical: PracticalReport | null;
+  state: ToggleState;
+}) {
   const r = report.report;
   const b = r.buckets;
   const total = r.totalTx;
@@ -208,6 +228,9 @@ function Dashboard({ report, state }: { report: Report; state: ToggleState }) {
         </div>
       </section>
 
+      {/* Theory vs practice */}
+      {practical && <PracticalPanel practical={practical} />}
+
       {/* Cumulative chart */}
       <section className="card">
         <h3>Coverage as contracts are added</h3>
@@ -306,6 +329,91 @@ function Dashboard({ report, state }: { report: Report; state: ToggleState }) {
 
 function numOr(n: number) {
   return Number.isFinite(n) ? n : "—";
+}
+
+function PracticalPanel({ practical }: { practical: PracticalReport }) {
+  const p = practical.report;
+  const c = p.counts;
+  const w = practical.sampleWindow;
+  const statusColor: Record<string, string> = {
+    pass: "#4ade80",
+    partial: "#eab308",
+    failed: "#f87171",
+  };
+  return (
+    <section className="card">
+      <h3>Theory vs practice</h3>
+      <p className="muted small">
+        Runs the Sourcify clear-signing library on a sample transaction per covered contract
+        function, to check it actually renders — not just that a descriptor exists. Sampled
+        over {w.hours}h ending {w.endIso.replace("T", " ").replace(".000Z", "Z")}.
+      </p>
+      <div className="denoms">
+        <Stat label="Renders in practice" value={fmtPct(p.txWeighted.practicePct)} />
+        <div className="statBox">
+          <div className="statVal">
+            <span style={{ color: statusColor.pass }}>{c.pass}</span> ·{" "}
+            <span style={{ color: statusColor.partial }}>{c.partial}</span> ·{" "}
+            <span style={{ color: statusColor.failed }}>{c.failed}</span>
+          </div>
+          <div className="statLbl muted">pass · partial · failed groups</div>
+        </div>
+        <Stat label="Covered groups sampled" value={fmtInt(p.sampledGroups)} />
+      </div>
+
+      {p.problems.length === 0 ? (
+        <p className="small" style={{ color: statusColor.pass, marginTop: 14 }}>
+          ✓ Every sampled covered function rendered cleanly — no theory-vs-practice gaps.
+        </p>
+      ) : (
+        <table className="tbl" style={{ marginTop: 12 }}>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Contract</th>
+              <th>Function</th>
+              <th className="r">Txs</th>
+              <th>Warning</th>
+            </tr>
+          </thead>
+          <tbody>
+            {p.problems.slice(0, 25).map((pr) => (
+              <tr key={`${pr.toAddress}-${pr.selector}`}>
+                <td>
+                  <span className="tag" style={{ color: statusColor[pr.status] }}>
+                    {pr.status}
+                  </span>
+                </td>
+                <td>
+                  {pr.entity && <span className="tag">{pr.entity}</span>}
+                  <a
+                    className="mono"
+                    href={`https://etherscan.io/address/${pr.toAddress}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {short(pr.toAddress)}
+                  </a>
+                </td>
+                <td className="mono small">{pr.functionSig ?? pr.selector}</td>
+                <td className="r">{fmtInt(pr.txCount)}</td>
+                <td className="small">
+                  {pr.warnings[0] ? (
+                    <>
+                      <span className="mono">{pr.warnings[0].code}</span>
+                      <div className="muted">{pr.warnings[0].message}</div>
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
 }
 
 function Stat({ label, value }: { label: string; value: string }) {

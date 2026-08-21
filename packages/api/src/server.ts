@@ -31,11 +31,11 @@ interface ReportFile {
   totalTx: number;
 }
 
-function listReports(): { file: string; json: any }[] {
+function listByPrefix(prefix: string): { file: string; json: any }[] {
   if (!fs.existsSync(OUT_DIR)) return [];
   return fs
     .readdirSync(OUT_DIR)
-    .filter((f) => f.startsWith("report") && f.endsWith(".json"))
+    .filter((f) => f.startsWith(prefix) && f.endsWith(".json"))
     .map((f) => {
       try {
         const json = JSON.parse(fs.readFileSync(path.join(OUT_DIR, f), "utf8"));
@@ -49,6 +49,10 @@ function listReports(): { file: string; json: any }[] {
       String(b.json.generatedAtIso ?? "").localeCompare(String(a.json.generatedAtIso ?? "")),
     );
 }
+
+// Coverage reports are report*.json; practical runs are practical*.json.
+const listReports = () => listByPrefix("report");
+const listPractical = () => listByPrefix("practical");
 
 const app = express();
 app.use(cors());
@@ -68,6 +72,12 @@ app.get("/api/reports", (_req, res) => {
 app.get("/api/report/latest", (_req, res) => {
   const all = listReports();
   if (all.length === 0) return res.status(404).json({ error: "no reports in out/" });
+  res.json(all[0].json);
+});
+
+app.get("/api/practical/latest", (_req, res) => {
+  const all = listPractical();
+  if (all.length === 0) return res.status(404).json({ error: "no practical runs in out/" });
   res.json(all[0].json);
 });
 

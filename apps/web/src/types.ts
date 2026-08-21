@@ -15,6 +15,40 @@ export interface RankedContract {
   cumulativePct: number;
 }
 
+export interface PracticalProblem {
+  toAddress: string;
+  selector: string;
+  functionSig?: string;
+  entity?: string;
+  descriptorPath?: string;
+  txCount: number;
+  status: "pass" | "partial" | "failed";
+  intent?: string;
+  warnings: { code: string; message: string }[];
+  sampleTxHash: string;
+}
+
+export interface PracticalReport {
+  generatedAtIso: string;
+  chainId: number;
+  registryCommit: string | null;
+  sampleWindow: { endIso: string; hours: number };
+  bytesProcessed: number;
+  report: {
+    sampledGroups: number;
+    counts: { pass: number; partial: number; failed: number };
+    txWeighted: {
+      coveredSampledTx: number;
+      passTx: number;
+      partialTx: number;
+      failedTx: number;
+      practicePct: number;
+    };
+    problems: PracticalProblem[];
+    warningCodeTotals: Record<string, number>;
+  };
+}
+
 export interface Report {
   generatedAtIso: string;
   chainId: number;
