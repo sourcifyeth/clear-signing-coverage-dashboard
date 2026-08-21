@@ -3,6 +3,10 @@
   "version": "0.0.0",
   "description": "Stage A: build the ERC-7730 clear-signing coverage set (chainId, address, selector) from a local registry checkout.",
   "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "bin": {
     "build-coverage": "./src/cli.ts"
   },
