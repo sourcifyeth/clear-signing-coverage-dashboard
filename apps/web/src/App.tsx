@@ -231,7 +231,11 @@ function Dashboard({
       </section>
 
       {/* Live decode */}
-      <TxInspector examples={practical?.report.examples ?? []} seed={seedHash} />
+      <TxInspector
+        examples={practical?.report.examples ?? []}
+        feed={practical?.report.feed ?? []}
+        seed={seedHash}
+      />
 
       {/* Theory vs practice */}
       {practical && <PracticalPanel practical={practical} onInspect={setSeedHash} />}

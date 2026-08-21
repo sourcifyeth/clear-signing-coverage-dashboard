@@ -46,8 +46,20 @@ export interface PracticalReport {
     };
     problems: PracticalProblem[];
     examples: { hash: string; entity?: string; functionSig?: string; toAddress: string }[];
+    feed: FeedItem[];
     warningCodeTotals: Record<string, number>;
   };
+}
+
+export interface FeedItem {
+  hash: string;
+  toAddress: string;
+  selector: string;
+  entity?: string;
+  functionSig?: string;
+  status: "pass" | "partial" | "failed";
+  intent?: string;
+  txCount: number;
 }
 
 export interface Report {

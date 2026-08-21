@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { isFieldGroup } from "@ethereum-sourcify/clear-signing";
 import type { DisplayModel, DisplayField } from "@ethereum-sourcify/clear-signing";
 import { decodeTxHash, type DecodeOutcome } from "./decoder.ts";
+import type { FeedItem } from "./types.ts";
 
 export interface Example {
   hash: string;
@@ -10,17 +11,33 @@ export interface Example {
   toAddress: string;
 }
 
+const fmtInt = (n: number) => n.toLocaleString("en-US");
+const DOT: Record<FeedItem["status"], string> = {
+  pass: "#4ade80",
+  partial: "#eab308",
+  failed: "#f87171",
+};
+
 const STATUS_META: Record<DecodeOutcome["status"], { color: string; text: string }> = {
   clear: { color: "#4ade80", text: "Clear-signed" },
   partial: { color: "#eab308", text: "Clear-signed (with warnings)" },
   raw: { color: "#f87171", text: "Not clear-signable — raw calldata" },
 };
 
-export function TxInspector({ examples, seed }: { examples: Example[]; seed?: string }) {
+export function TxInspector({
+  examples,
+  feed = [],
+  seed,
+}: {
+  examples: Example[];
+  feed?: FeedItem[];
+  seed?: string;
+}) {
   const [hash, setHash] = useState(seed ?? "");
   const [loading, setLoading] = useState(false);
   const [outcome, setOutcome] = useState<DecodeOutcome | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activeHash, setActiveHash] = useState<string | null>(null);
 
   async function run(h: string) {
     const clean = h.trim();
@@ -32,6 +49,7 @@ export function TxInspector({ examples, seed }: { examples: Example[]; seed?: st
     setLoading(true);
     setError(null);
     setOutcome(null);
+    setActiveHash(clean.toLowerCase());
     try {
       setOutcome(await decodeTxHash(clean));
     } catch (e) {
@@ -93,6 +111,32 @@ export function TxInspector({ examples, seed }: { examples: Example[]; seed?: st
 
       {error && <div className="inspectError small">{error}</div>}
       {outcome && <DecodeView outcome={outcome} />}
+
+      {feed.length > 0 && (
+        <div className="feed">
+          <div className="feedHead muted small">
+            Transactions we decoded ({feed.length}) — click one to clear-sign it live
+          </div>
+          <div className="feedList">
+            {feed.map((it) => (
+              <button
+                key={it.hash}
+                className={`feedRow ${activeHash === it.hash.toLowerCase() ? "active" : ""}`}
+                onClick={() => run(it.hash)}
+                title={it.functionSig ?? it.selector}
+              >
+                <span className="feedDot" style={{ background: DOT[it.status] }} />
+                <span className="feedEntity">{it.entity ?? "?"}</span>
+                <span className="feedFn mono">
+                  {it.functionSig ? it.functionSig.split("(")[0] : it.selector}
+                </span>
+                <span className="feedIntent muted">{it.intent ?? ""}</span>
+                <span className="feedTx muted">{fmtInt(it.txCount)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }

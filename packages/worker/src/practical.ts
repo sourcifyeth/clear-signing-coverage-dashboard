@@ -48,7 +48,20 @@ export interface PracticalReport {
   problems: PracticalResult[];
   /** a few high-volume passing samples, as ready demos for the live inspector */
   examples: { hash: string; entity?: string; functionSig?: string; toAddress: string }[];
+  /** every sampled group as a browsable, clickable feed (by tx volume) */
+  feed: FeedItem[];
   warningCodeTotals: Record<string, number>;
+}
+
+export interface FeedItem {
+  hash: string;
+  toAddress: string;
+  selector: string;
+  entity?: string;
+  functionSig?: string;
+  status: PracticalStatus;
+  intent?: string;
+  txCount: number;
 }
 
 function classify(model: DisplayModel): PracticalStatus {
@@ -163,6 +176,19 @@ export async function runPractical(opts: {
       toAddress: r.toAddress,
     }));
 
+  const feed: FeedItem[] = [...results]
+    .sort((a, b) => b.txCount - a.txCount)
+    .map((r) => ({
+      hash: r.sampleTxHash,
+      toAddress: r.toAddress,
+      selector: r.selector,
+      entity: r.entity,
+      functionSig: r.functionSig,
+      status: r.status,
+      intent: r.intent,
+      txCount: r.txCount,
+    }));
+
   return {
     chainId,
     sampledGroups: results.length,
@@ -170,6 +196,7 @@ export async function runPractical(opts: {
     txWeighted: { ...tx, practicePct },
     problems,
     examples,
+    feed,
     warningCodeTotals,
   };
 }
