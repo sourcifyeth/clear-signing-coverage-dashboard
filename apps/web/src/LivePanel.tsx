@@ -226,9 +226,9 @@ export function LivePanel({
   const pendingBlocks = (() => {
     const r = pendingRange;
     if (!r) return "";
-    if (r.lo === r.hi) return `block ${fmtInt(r.lo)}`;
+    if (r.lo === r.hi) return `1 block, #${fmtInt(r.lo)}`;
     const n = r.hi - r.lo + 1;
-    return `blocks ${fmtInt(r.lo)} to ${fmtInt(r.hi)}, ${n} blocks`;
+    return `${n} blocks, #${fmtInt(r.lo)} – #${fmtInt(r.hi)}`;
   })();
 
   return (
