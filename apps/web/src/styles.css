@@ -1671,3 +1671,12 @@ footer {
 .argScalar {
   color: #4b5563;
 }
+
+/* decoded arguments: indented under the signature, with air between them */
+.decoded > .args {
+  margin: 8px 0 0 14px;
+  gap: 10px;
+}
+.decoded > .args > .argRow {
+  padding: 2px 0;
+}
