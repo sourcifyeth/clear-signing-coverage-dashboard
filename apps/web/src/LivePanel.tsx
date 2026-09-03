@@ -203,7 +203,19 @@ export function LivePanel({
   const total = s?.totalTx ?? 0;
   const excluding = !state.countEth || !state.countToken;
   const visibleTxs = txs.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken)).slice(0, TICKER_MAX);
-  const pendingVisible = pending.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken)).length;
+  const pendingShown = pending.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken));
+  const pendingVisible = pendingShown.length;
+  // "block N" or "blocks N to M" for the rows waiting in the banner
+  const pendingBlocks = (() => {
+    if (pendingShown.length === 0) return "";
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const t of pendingShown) {
+      if (t.blockNumber < lo) lo = t.blockNumber;
+      if (t.blockNumber > hi) hi = t.blockNumber;
+    }
+    return lo === hi ? `block ${fmtInt(lo)}` : `blocks ${fmtInt(lo)} to ${fmtInt(hi)}`;
+  })();
 
   return (
     <>
@@ -333,7 +345,8 @@ export function LivePanel({
               </div>
               {pendingVisible > 0 && (
                 <button className="newBanner" onClick={showPending}>
-                  {fmtInt(pendingVisible)} new transaction{pendingVisible === 1 ? "" : "s"} arrived · show
+                  {fmtInt(pendingVisible)} new transaction{pendingVisible === 1 ? "" : "s"} arrived in{" "}
+                  <span className="mono">{pendingBlocks}</span> · show
                 </button>
               )}
               <div className="ticker">
