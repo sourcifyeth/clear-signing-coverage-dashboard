@@ -96,6 +96,8 @@ export function LivePanel({
   const [pending, setPending] = useState<LiveTx[]>([]);
   /** every block that landed since the list was last rendered, as a range (kept even when rows are dropped) */
   const [pendingRange, setPendingRange] = useState<{ lo: number; hi: number } | null>(null);
+  /** true once the buffer hit PENDING_MAX and dropped rows; the banner then shows "3,000+" */
+  const pendingOverflowRef = useRef(false);
   const [blocks, setBlocks] = useState<BlockStat[]>([]);
   const [connected, setConnected] = useState(false);
   /** user-triggered refetches in flight (window or toggle change); > 0 shows the page overlay */
@@ -131,6 +133,7 @@ export function LivePanel({
     setTxs(rows);
     setPending([]);
     setPendingRange(null);
+    pendingOverflowRef.current = false;
   }
 
   // Initial load.
@@ -194,7 +197,10 @@ export function LivePanel({
       const e = JSON.parse((ev as MessageEvent).data) as LiveBlockEvent;
       setLatest(e.block);
       onLatest?.(e.block);
-      setPending((prev) => mergeTxs(e.txs, prev, PENDING_MAX));
+      setPending((prev) => {
+        if (e.txs.length + prev.length > PENDING_MAX) pendingOverflowRef.current = true;
+        return mergeTxs(e.txs, prev, PENDING_MAX);
+      });
       // Track the block range since the last render from the blocks the event
       // announces, so it stays right even if rows are dropped from the buffer.
       const nums = (e.blocks?.length ? e.blocks.map((b) => b.number) : []).concat(e.block.number);
@@ -224,6 +230,7 @@ export function LivePanel({
     setTxs((prev) => mergeTxs(pending, prev));
     setPending([]);
     setPendingRange(null);
+    pendingOverflowRef.current = false;
     // Once the last row has landed, treat them as shown so nothing re-animates later.
     const settleMs = Math.min(order.size, 40) * 35 + 800;
     setTimeout(() => {
@@ -367,7 +374,8 @@ export function LivePanel({
               </div>
               {pendingVisible > 0 && (
                 <button className="newBanner" onClick={showPending}>
-                  {fmtInt(pendingVisible)} new transaction{pendingVisible === 1 ? "" : "s"} arrived{" "}
+                  {fmtInt(pendingVisible)}
+                  {pendingOverflowRef.current ? "+" : ""} new transaction{pendingVisible === 1 ? "" : "s"} arrived{" "}
                   <span className="bannerBlocks">({pendingBlocks})</span> · show
                 </button>
               )}
