@@ -153,6 +153,13 @@ export function RankingPanel({
           <img src="/sourcify.png" alt="" />
           Verified on Sourcify only
         </label>
+        <span
+          className="infoTip"
+          tabIndex={0}
+          data-tip="Verified source code is a precondition for clear signing. A descriptor describes the contract's functions and their parameters, which needs the ABI from the source. A bytecode-only contract has no known functions to describe, so there is nothing to clear-sign."
+        >
+          i
+        </span>
       </div>
 
       {!data ? (
