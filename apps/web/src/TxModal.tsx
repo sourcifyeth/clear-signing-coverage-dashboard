@@ -73,6 +73,14 @@ export function TxModal({ hash, onClose }: { hash: string; onClose: () => void }
   );
 }
 
+/** Colour of the status banner: green for clear-signed, amber for warnings, red for raw hex, blue for wallet-native. */
+function toneOf(row: LiveTxDetail): "ok" | "warn" | "bad" | "info" | "neutral" {
+  if (row.bucket === "covered_theory") return row.status === "failed" ? "bad" : row.status === "partial" ? "warn" : "ok";
+  if (row.bucket === "not_covered") return "bad";
+  if (row.bucket === "contract_creation") return "neutral";
+  return "info";
+}
+
 function TxBody({ row }: { row: LiveTxDetail }) {
   const icon = iconFor(row);
   const sig = row.functionSig ? canonicalSig(row.functionSig) : null;
@@ -86,9 +94,8 @@ function TxBody({ row }: { row: LiveTxDetail }) {
               Explorer ↗
             </a>
           </div>
-          <div className="muted small statusLine">
-            <span className={`tickIcon ${icon.cls ?? ""}`}>{icon.glyph}</span> {icon.tip} · block {fmtInt(row.blockNumber)} ·{" "}
-            {row.blockTimeIso.replace("T", " ").replace(".000Z", " UTC")}
+          <div className="muted small">
+            block {fmtInt(row.blockNumber)} · {row.blockTimeIso.replace("T", " ").replace(".000Z", " UTC")}
           </div>
         </div>
       </div>
@@ -130,6 +137,11 @@ function TxBody({ row }: { row: LiveTxDetail }) {
             </span>
           </div>
         )}
+      </div>
+
+      <div className={`statusBanner ${toneOf(row)}`} role="status">
+        <span className={`tickIcon big ${icon.cls ?? ""}`}>{icon.glyph}</span>
+        <span className="statusText">{icon.tip}</span>
       </div>
 
       <Result row={row} />

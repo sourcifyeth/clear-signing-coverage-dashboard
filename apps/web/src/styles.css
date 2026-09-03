@@ -1562,3 +1562,42 @@ footer {
   font-weight: 400;
   color: var(--muted);
 }
+
+/* tx modal: prominent status banner between the meta rows and the result */
+.statusBanner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0 12px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background: #f3f4f6;
+  color: #111827;
+  font-size: 16px;
+  font-weight: 600;
+}
+.statusBanner .tickIcon.big {
+  font-size: 22px;
+  width: auto;
+}
+.statusBanner.ok {
+  background: #ecfdf3;
+  border-color: #a7f3c9;
+  color: #15803d;
+}
+.statusBanner.warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #b45309;
+}
+.statusBanner.bad {
+  background: #fff1f2;
+  border-color: #fecdd3;
+  color: #be123c;
+}
+.statusBanner.info {
+  background: #eef2fb;
+  border-color: #c7d2ee;
+  color: #2b50aa;
+}
