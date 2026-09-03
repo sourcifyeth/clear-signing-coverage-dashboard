@@ -845,6 +845,10 @@ footer {
   background: #dbe5ff;
   border-color: var(--blue-300);
 }
+.bannerBlocks {
+  font-weight: 400;
+  opacity: 0.75;
+}
 
 /* ---------------------------------------------------------------------------
    last-blocks strip */

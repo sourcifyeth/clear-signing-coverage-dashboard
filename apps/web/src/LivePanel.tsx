@@ -345,8 +345,8 @@ export function LivePanel({
               </div>
               {pendingVisible > 0 && (
                 <button className="newBanner" onClick={showPending}>
-                  {fmtInt(pendingVisible)} new transaction{pendingVisible === 1 ? "" : "s"} arrived in{" "}
-                  <span className="mono">{pendingBlocks}</span> · show
+                  {fmtInt(pendingVisible)} new transaction{pendingVisible === 1 ? "" : "s"} arrived{" "}
+                  <span className="bannerBlocks">({pendingBlocks})</span> · show
                 </button>
               )}
               <div className="ticker">
