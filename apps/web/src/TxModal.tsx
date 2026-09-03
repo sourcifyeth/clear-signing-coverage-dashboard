@@ -172,9 +172,18 @@ function Result({ row }: { row: LiveTxDetail }) {
 }
 
 function DecodeView({ model }: { model: DisplayModel }) {
+  const fieldWarnings = countFieldWarnings(model.fields);
   return (
     <div className="decode">
-      <div className="muted small">What the wallet shows, as rendered by the Sourcify library when the block landed:</div>
+      <div className="muted small">
+        What the wallet shows, as rendered by the Sourcify library when the block landed.
+        {fieldWarnings > 0 && (
+          <span className="fieldWarnCount">
+            {" "}
+            ⚠️ {fieldWarnings} field warning{fieldWarnings === 1 ? "" : "s"}
+          </span>
+        )}
+      </div>
       {model.rawCalldataFallback ? (
         <div className="rawFallback">
           <div className="mono small">
@@ -210,6 +219,27 @@ function DecodeView({ model }: { model: DisplayModel }) {
   );
 }
 
+/** Field-level warnings, counted through groups. These do not change the pass/partial status. */
+export function countFieldWarnings(fields: DisplayModel["fields"]): number {
+  let n = 0;
+  for (const f of fields ?? []) {
+    if (isFieldGroup(f)) {
+      if (f.warning) n++;
+      n += countFieldWarnings(f.fields);
+    } else if (f.warning) n++;
+  }
+  return n;
+}
+
+function FieldWarning({ warning }: { warning?: { code: string; message: string } }) {
+  if (!warning) return null;
+  return (
+    <div className="fieldWarn small">
+      <span className="mono warnCode">{warning.code}</span> {warning.message}
+    </div>
+  );
+}
+
 function FieldList({ fields }: { fields: DisplayModel["fields"] }) {
   if (!fields || fields.length === 0) return null;
   return (
@@ -218,6 +248,7 @@ function FieldList({ fields }: { fields: DisplayModel["fields"] }) {
         isFieldGroup(f) ? (
           <div key={i} className="fieldGroup">
             {f.label && <div className="fieldGroupLabel">{f.label}</div>}
+            <FieldWarning warning={f.warning} />
             {f.fields.map((sf, j) => (
               <FieldRow key={j} field={sf} />
             ))}
@@ -232,9 +263,12 @@ function FieldList({ fields }: { fields: DisplayModel["fields"] }) {
 
 function FieldRow({ field }: { field: DisplayField }) {
   return (
-    <div className="fieldRow">
-      <div className="fieldLabel muted">{field.label}</div>
-      <div className="fieldValue mono">{field.value}</div>
+    <div className={`fieldRow ${field.warning ? "warned" : ""}`}>
+      <div className="fieldMain">
+        <div className="fieldLabel muted">{field.label}</div>
+        <div className="fieldValue mono">{field.value}</div>
+      </div>
+      <FieldWarning warning={field.warning} />
     </div>
   );
 }
