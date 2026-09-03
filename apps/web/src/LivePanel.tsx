@@ -75,6 +75,8 @@ export function LivePanel({
   const [pending, setPending] = useState<LiveTx[]>([]);
   const [blocks, setBlocks] = useState<BlockStat[]>([]);
   const [connected, setConnected] = useState(false);
+  /** user-triggered refetches in flight (window or toggle change); > 0 shows the page overlay */
+  const [busy, setBusy] = useState(0);
   const [now, setNow] = useState(Date.now());
   const [activeHash, setActiveHash] = useState<string | null>(null);
   const winRef = useRef<Win>(win);
@@ -135,10 +137,17 @@ export function LivePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Run user-triggered fetches under the page overlay; keep it up ≥300 ms so it never just flickers. */
+  function withBusy(p: Promise<unknown>) {
+    setBusy((b) => b + 1);
+    const minShow = new Promise((r) => setTimeout(r, 300));
+    void Promise.all([p.catch(() => undefined), minShow]).finally(() => setBusy((b) => b - 1));
+  }
+
   // Window change.
   useEffect(() => {
     winRef.current = win;
-    if (latest) void fetchSummary(win);
+    if (latest) withBusy(fetchSummary(win));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [win]);
 
@@ -146,8 +155,7 @@ export function LivePanel({
   // come from the API again (the list, so it is a full page after filtering).
   useEffect(() => {
     if (!loaded || !latest) return;
-    void fetchSummary(winRef.current);
-    void fetchRecent();
+    withBusy(Promise.all([fetchSummary(winRef.current), fetchRecent()]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.countEth, state.countToken]);
 
@@ -199,6 +207,13 @@ export function LivePanel({
 
   return (
     <>
+      {busy > 0 && (
+        <div className="pageLoading" aria-live="polite">
+          <div className="pageLoadingBox">
+            <span className="spinner" /> Updating…
+          </div>
+        </div>
+      )}
       <section className="card live">
         <div className="liveHead">
           <h3>
@@ -245,7 +260,7 @@ export function LivePanel({
                     )}
                   </div>
                   <div className="toggles">
-                    <Toggle on disabled label={`Descriptors ${fmtPct(s.headline.theoryPctOfAll)}`} swatch="#2b50aa" />
+                    <Toggle on disabled label={`Descriptors ${fmtPct(s.headline.theoryPctOfAll)}`} swatch="#4ade80" />
                     <Toggle
                       on={state.countEth}
                       onClick={() => state.setCountEth(!state.countEth)}
@@ -256,7 +271,7 @@ export function LivePanel({
                       on={state.countToken}
                       onClick={() => state.setCountToken(!state.countToken)}
                       label={`Include token transfers · ${fmtPct(s.allTx ? (s.native.tokenTransfers / s.allTx) * 100 : 0)}`}
-                      swatch="#87b141"
+                      swatch="#7693da"
                     />
                   </div>
                   {excluding && (
@@ -347,6 +362,7 @@ export function LivePanel({
           exclude={excludeParam(state.countEth, state.countToken)}
           excluding={excluding}
           refreshKey={latest.number}
+          onBusy={(d) => setBusy((b) => b + d)}
         />
       )}
     </>

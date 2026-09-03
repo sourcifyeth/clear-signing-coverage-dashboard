@@ -49,26 +49,10 @@ export function App() {
             <img src="/sourcify.png" alt="Sourcify logo" />
             <span className="vt">sourcify.eth</span>
           </a>
-          <nav className="topnav">
-            <a href="https://sourcify.dev" target="_blank" rel="noreferrer">
-              Sourcify ↗
-            </a>
-            <a href="https://verify.sourcify.dev" target="_blank" rel="noreferrer">
-              Verify
-            </a>
-            <a href="https://repo.sourcify.dev" target="_blank" rel="noreferrer">
-              Repo
-            </a>
-            <a href="https://4byte.sourcify.dev" target="_blank" rel="noreferrer">
-              4byte
-            </a>
-            <a className="current" href="/">
-              Clear-signing
-            </a>
-            <a href={REGISTRY_REPO} target="_blank" rel="noreferrer">
-              Registry ↗
-            </a>
-          </nav>
+          <div className="topText">
+            Live coverage of ERC-7730 clear-signing on Ethereum mainnet, measured with the Sourcify
+            clear-signing library.
+          </div>
         </div>
       </div>
 
@@ -168,7 +152,7 @@ function Snapshot({ report, state }: { report: Report; state: ToggleState }) {
               : "of the remaining transactions clear-signable"}
           </div>
           <div className="toggles">
-            <Toggle on disabled label={`Descriptors ${fmtPct(r.headline.theoryPctOfAll)}`} swatch="#2b50aa" />
+            <Toggle on disabled label={`Descriptors ${fmtPct(r.headline.theoryPctOfAll)}`} swatch="#4ade80" />
             <Toggle
               on={state.countEth}
               onClick={() => state.setCountEth(!state.countEth)}
@@ -179,7 +163,7 @@ function Snapshot({ report, state }: { report: Report; state: ToggleState }) {
               on={state.countToken}
               onClick={() => state.setCountToken(!state.countToken)}
               label={`Include token transfers · ${fmtPct((b.token_native / total) * 100)}`}
-              swatch="#87b141"
+              swatch="#7693da"
             />
           </div>
           {(!state.countEth || !state.countToken) && (

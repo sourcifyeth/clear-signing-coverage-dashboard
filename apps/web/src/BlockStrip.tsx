@@ -46,7 +46,7 @@ export function BlockStrip({
     <div className="strip">
       <div className="stripHead">
         <div>
-          <span className="stripNum" style={{ color: COLOR.ok }}>
+          <span className="stripNum" style={{ color: COLOR.okText }}>
             {fmtInt(lastSplit.signable)}
           </span>
           <span className="muted"> of </span>
@@ -85,7 +85,7 @@ export function BlockStrip({
           >
             <div className="mono">block {fmtInt(shown.number)}</div>
             <div>
-              <b style={{ color: COLOR.eth }}>{fmtInt(shownSplit.signable)}</b> clear-signable ·{" "}
+              <b style={{ color: COLOR.ok }}>{fmtInt(shownSplit.signable)}</b> clear-signable ·{" "}
               <b style={{ color: COLOR.no }}>{fmtInt(shownSplit.counted - shownSplit.signable)}</b> not ·{" "}
               {fmtPct(shownSplit.pct)}
             </div>

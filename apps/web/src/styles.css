@@ -18,10 +18,12 @@
   --coral: #ff858d;
   --coral-600: #d65861;
   --coral-700: #ae373f;
-  --green-200: #ceec9e;
-  --green-400: #a4d851;
-  --green: #87b141;
-  --green-700: #4c730e;
+  /* the dashboard's original green, kept: fills use it, text uses the darker step */
+  --green-200: #bbf7d0;
+  --green-400: #86efac;
+  --green: #4ade80;
+  --green-700: #16a34a;
+  --green-bg: #f0fdf4;
   --amber: #d97706;
   --amber-bg: #fffbeb;
   --amber-border: #fcd34d;
@@ -131,33 +133,12 @@ button {
   font-size: 26px;
   line-height: 1;
 }
-.topnav {
-  display: flex;
-  align-items: center;
-  gap: 4px 22px;
-  flex-wrap: wrap;
-  font-family: var(--vt);
-  font-size: 24px;
-  font-size-adjust: 0.4;
-  color: var(--text-soft);
-}
-.topnav a {
-  color: inherit;
-  text-decoration: none;
-  transition: color 0.15s;
-  /* Sourcify's coral underline that slides in on hover */
-  background-image: linear-gradient(transparent calc(100% - 3px), var(--coral) 3px);
-  background-repeat: no-repeat;
-  background-size: 0% 100%;
-  transition: background-size 0.3s, color 0.15s;
-}
-.topnav a:hover {
-  color: var(--blue);
-  background-size: 100% 100%;
-}
-.topnav a.current {
-  color: var(--blue);
-  background-size: 100% 100%;
+.topText {
+  max-width: 420px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+  text-align: right;
 }
 
 /* ---------------------------------------------------------------------------
@@ -165,7 +146,7 @@ button {
 .wrap {
   max-width: 1120px;
   margin: 0 auto;
-  padding: 28px 24px 64px;
+  padding: 44px 24px 64px;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -178,6 +159,7 @@ button {
   align-items: flex-start;
   gap: 24px;
   flex-wrap: wrap;
+  margin-bottom: 12px;
   animation: fade-up 0.5s ease-out both;
 }
 .head h1 {
@@ -260,11 +242,12 @@ button {
   flex-direction: column;
 }
 .heroNum {
-  font-family: var(--vt);
-  font-size: 96px;
-  line-height: 0.85;
-  color: var(--blue);
-  letter-spacing: 0;
+  font-size: 60px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--green-700);
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
 }
 .heroLabel {
   font-size: 15px;
@@ -318,10 +301,12 @@ button {
   margin-bottom: 8px;
 }
 .reachNum {
-  font-family: var(--vt);
-  font-size: 64px;
-  line-height: 0.9;
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
   color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 .reachLabel {
   font-size: 13px;
@@ -343,13 +328,13 @@ button {
   padding: 10px 12px;
 }
 .statVal {
-  font-family: var(--vt);
-  font-size: 30px;
-  line-height: 0.9;
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .statLbl {
   font-size: 11px;
-  margin-top: 6px;
+  margin-top: 2px;
 }
 
 /* ---------------------------------------------------------------------------
@@ -545,24 +530,21 @@ button {
 }
 .liveDot.on {
   background: var(--green);
-  box-shadow: 0 0 0 3px rgba(135, 177, 65, 0.25);
+  box-shadow: 0 0 0 3px rgba(74, 222, 128,0.25);
   animation: pulse 2s infinite;
 }
 @keyframes pulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(135, 177, 65, 0.4);
+    box-shadow: 0 0 0 0 rgba(74, 222, 128,0.4);
   }
   70% {
-    box-shadow: 0 0 0 6px rgba(135, 177, 65, 0);
+    box-shadow: 0 0 0 6px rgba(74, 222, 128,0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(135, 177, 65, 0);
+    box-shadow: 0 0 0 0 rgba(74, 222, 128,0);
   }
 }
 .liveBlock {
-  font-family: var(--vt);
-  font-size: 20px;
-  font-size-adjust: 0.4;
   color: var(--text-soft);
 }
 .liveBlock a {
@@ -663,45 +645,27 @@ button {
   line-height: 1.4;
 }
 
-/* transaction icon: a small tile with a glyph, no emoji */
+/* transaction icon: an emoji, or a small badge for the ETH sign */
 .tickIcon {
   position: relative;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 5px;
-  font-family: var(--mono);
-  font-weight: 600;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1;
-  color: #fff;
   cursor: default;
   flex: none;
 }
-.tickIcon.ok {
-  background: var(--blue);
-}
-.tickIcon.warn {
-  background: var(--amber);
-}
-.tickIcon.no {
-  background: var(--coral);
-  color: #5d0e13;
-}
-.tickIcon.tok {
-  background: var(--green);
-  color: #1f3300;
-}
 .tickIcon.eth {
+  border-radius: 50%;
   background: var(--blue-100);
   color: var(--blue);
   border: 1px solid var(--blue-200);
-}
-.tickIcon.new {
-  background: var(--border);
-  color: var(--text-soft);
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 12px;
 }
 /* instant tooltip: native title has a ~1s delay */
 .tickIcon[data-tip]:hover::after {
@@ -724,8 +688,61 @@ button {
 .tickIcon.big {
   width: 40px;
   height: 40px;
-  font-size: 22px;
+  font-size: 26px;
   border-radius: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+.tickIcon.big.eth {
+  font-size: 20px;
+  border-radius: 10px;
+}
+
+/* full-page "updating" overlay while a user-triggered refetch (window or toggle change) is in flight */
+.pageLoading {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(243, 244, 246, 0.55);
+  backdrop-filter: blur(1.5px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: all;
+  animation: fade-in 0.15s ease-out;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.pageLoadingBox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: var(--text-soft);
+  box-shadow: 0 8px 24px rgba(17, 24, 39, 0.12);
+}
+.spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--blue-200);
+  border-top-color: var(--blue);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .tickBlock {
   font-size: 12px;
@@ -827,9 +844,10 @@ footer {
   font-size: 14px;
 }
 .stripNum {
-  font-family: var(--vt);
-  font-size: 30px;
-  line-height: 0.9;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
 }
 .stripBars {
   position: relative;
@@ -856,13 +874,13 @@ footer {
   background: var(--coral-100);
 }
 .stripSig {
-  background: var(--blue);
+  background: var(--green);
 }
 .stripCol.hover .stripRest {
   background: var(--coral-300);
 }
 .stripCol.hover .stripSig {
-  background: var(--blue-400);
+  background: var(--green-700);
 }
 .stripCol.last {
   outline: 2px solid var(--text);
@@ -916,10 +934,10 @@ footer {
   vertical-align: middle;
 }
 .rankTbl tr.rowOk td:first-child {
-  box-shadow: inset 3px 0 0 var(--blue);
+  box-shadow: inset 3px 0 0 var(--green);
 }
 .rankTbl tr.rowPart td:first-child {
-  box-shadow: inset 3px 0 0 var(--green);
+  box-shadow: inset 3px 0 0 var(--amber);
 }
 .rankTbl .contractCell {
   white-space: nowrap;
@@ -939,14 +957,14 @@ footer {
   background: #fff;
 }
 .badge.ok {
-  color: var(--blue-700);
-  border-color: var(--blue-200);
-  background: var(--blue-100);
-}
-.badge.part {
   color: var(--green-700);
   border-color: var(--green-400);
-  background: #f3fadf;
+  background: var(--green-bg);
+}
+.badge.part {
+  color: var(--amber-text);
+  border-color: var(--amber-border);
+  background: var(--amber-bg);
 }
 .badge.no {
   color: var(--coral-700);
@@ -978,17 +996,11 @@ footer {
   font-size: 11px;
 }
 .selChip.ok {
-  border-color: var(--blue-200);
-}
-.selChip.ok .mark {
-  color: var(--blue);
+  border-color: var(--green-400);
 }
 .selChip.no {
   border-color: var(--border);
   color: var(--text-soft);
-}
-.selChip.no .mark {
-  color: var(--coral-600);
 }
 .selChip:hover {
   border-color: var(--blue);

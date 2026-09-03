@@ -1,20 +1,21 @@
 import type { BucketKey, Buckets, LiveStatus } from "./types.ts";
 
-// Sourcify palette: cerulean blue = covered, light coral = not covered,
-// partial-match green = wallet-native token calls, light blue = ETH sends.
+// Sourcify palette: green = covered / clear-signable, light coral = not
+// covered, cerulean blues for the wallet-native kinds (token calls, ETH sends).
 export const BUCKETS: { key: BucketKey; label: string; color: string }[] = [
-  { key: "covered_theory", label: "Covered by descriptor", color: "#2b50aa" },
+  { key: "covered_theory", label: "Covered by descriptor", color: "#4ade80" },
   { key: "eth_transfer", label: "ETH transfer", color: "#a9bdee" },
-  { key: "token_native", label: "Token transfer / approve", color: "#87b141" },
+  { key: "token_native", label: "Token transfer / approve", color: "#7693da" },
   { key: "not_covered", label: "Not covered", color: "#ff858d" },
   { key: "contract_creation", label: "Contract creation", color: "#9ca3af" },
 ];
 
 export const COLOR = {
-  ok: "#2b50aa",
+  ok: "#4ade80",
+  okText: "#16a34a",
   no: "#ff858d",
   noText: "#ae373f",
-  part: "#87b141",
+  token: "#7693da",
   eth: "#a9bdee",
 } as const;
 

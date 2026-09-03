@@ -18,6 +18,7 @@ export function RankingPanel({
   exclude,
   excluding,
   refreshKey,
+  onBusy,
 }: {
   win: string;
   /** `&exclude=...` query fragment, "" for none */
@@ -25,30 +26,39 @@ export function RankingPanel({
   excluding: boolean;
   /** changes when a new block lands; the table refetches at most every 30s */
   refreshKey: number;
+  /** +1 when a user-triggered load starts, -1 when it ends (drives the page overlay) */
+  onBusy?: (delta: 1 | -1) => void;
 }) {
   const [by, setBy] = useState<By>("contract");
   const [data, setData] = useState<LiveRanking | null>(null);
   const [loading, setLoading] = useState(false);
   const lastFetch = useRef(0);
+  const firstLoad = useRef(true);
 
-  async function load() {
+  async function load(userTriggered: boolean) {
     lastFetch.current = Date.now();
     setLoading(true);
+    if (userTriggered) onBusy?.(1);
     try {
       const r = await fetch(`/api/live/ranking?window=${win}&by=${by}&limit=100${exclude}`);
       if (r.ok) setData(await r.json());
     } finally {
       setLoading(false);
+      if (userTriggered) onBusy?.(-1);
     }
   }
 
+  // A change of window, tab, or toggles is the user's doing: show the overlay.
+  // The very first load is not.
   useEffect(() => {
-    void load();
+    const user = !firstLoad.current;
+    firstLoad.current = false;
+    void load(user);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [win, by, exclude]);
 
   useEffect(() => {
-    if (Date.now() - lastFetch.current > REFETCH_MIN_MS) void load();
+    if (Date.now() - lastFetch.current > REFETCH_MIN_MS) void load(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
@@ -68,9 +78,8 @@ export function RankingPanel({
         </div>
       </div>
       <p className="muted small">
-        Every {by === "contract" ? "contract" : "function"} called in the window, most transactions first.{" "}
-        <span className="mark" style={{ color: "#2b50aa" }}>✓</span> has an ERC-7730 descriptor for the call,{" "}
-        <span className="mark" style={{ color: "#ae373f" }}>✕</span> does not.
+        Every {by === "contract" ? "contract" : "function"} called in the window, most transactions first.
+        ✅ has an ERC-7730 descriptor for the call, ❌ does not.
         {excluding && " ETH and standard token transfers are left out, as set above."}
         {data && (
           <>
@@ -92,29 +101,20 @@ export function RankingPanel({
 }
 
 function CoverageBadge({ row }: { row: RankedContractRow }) {
-  if (row.txCount > 0 && row.coveredTx === row.txCount)
-    return (
-      <span className="badge ok">
-        <span className="mark">✓</span> covered
-      </span>
-    );
+  if (row.txCount > 0 && row.coveredTx === row.txCount) return <span className="badge ok">✅ covered</span>;
   if (row.coveredTx > 0)
     return (
       <span className="badge part" title={`${fmtInt(row.coveredTx)} of ${fmtInt(row.txCount)} calls hit a covered function`}>
-        <span className="mark">◐</span> {fmtPct(row.coveredPct)} covered
+        ◐ {fmtPct(row.coveredPct)} covered
       </span>
     );
   if (row.inRegistry)
     return (
       <span className="badge part" title="The registry has a descriptor for this address, but not for the functions being called">
-        <span className="mark">◔</span> descriptor, functions missing
+        📄 descriptor, functions missing
       </span>
     );
-  return (
-    <span className="badge no">
-      <span className="mark">✕</span> not covered
-    </span>
-  );
+  return <span className="badge no">❌ not covered</span>;
 }
 
 function SelectorChip({ s }: { s: RankedSelector }) {
@@ -127,8 +127,7 @@ function SelectorChip({ s }: { s: RankedSelector }) {
       rel="noreferrer"
       title={`${s.functionSig ? canonicalSig(s.functionSig) + " " : ""}${s.selector} · ${fmtInt(s.txCount)} txs`}
     >
-      <span className="mark">{s.covered ? "✓" : "✕"}</span>
-      {name ?? s.selector}
+      {s.covered ? "✅" : "❌"} {name ?? s.selector}
       <span className="muted">{fmtInt(s.txCount)}</span>
     </a>
   );
@@ -235,17 +234,11 @@ function FunctionTable({ rows }: { rows: RankedFunctionRow[] }) {
               </td>
               <td>
                 {f.covered ? (
-                  <span className="badge ok">
-                    <span className="mark">✓</span> covered
-                  </span>
+                  <span className="badge ok">✅ covered</span>
                 ) : f.bucket === "token_native" ? (
-                  <span className="badge native">
-                    <span className="mark">⇄</span> wallet-native
-                  </span>
+                  <span className="badge native">💸 wallet-native</span>
                 ) : (
-                  <span className="badge no">
-                    <span className="mark">✕</span> not covered
-                  </span>
+                  <span className="badge no">❌ not covered</span>
                 )}
               </td>
               <td className="r">{fmtInt(f.txCount)}</td>
