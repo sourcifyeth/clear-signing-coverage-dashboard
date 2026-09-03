@@ -1680,3 +1680,16 @@ footer {
 .decoded > .args > .argRow {
   padding: 2px 0;
 }
+
+/* decoded arguments: tighter top-level spacing, a little air inside nested tuples / arrays */
+.decoded > .args {
+  gap: 6px;
+}
+.decoded > .args > .argRow {
+  padding: 0;
+}
+.argNested {
+  gap: 4px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
