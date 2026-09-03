@@ -41,6 +41,7 @@ import {
   insertBlock,
   deleteBlocksFrom,
   pruneLive,
+  pruneContracts,
   blockHash,
   latestBlock,
   type Bucket,
@@ -259,6 +260,9 @@ async function main(): Promise<void> {
       if (processed % PRUNE_EVERY_BLOCKS === 0) {
         const removed = pruneLive(db, RETENTION_DAYS);
         if (removed) log(`follower: pruned ${removed} blocks older than ${RETENTION_DAYS}d`);
+        // Verification cache rows outlive their last call only until this prune.
+        const staleContracts = pruneContracts(db, CHAIN_ID);
+        if (staleContracts) log(`follower: pruned ${staleContracts} contract rows no block in the window calls`);
       }
     } catch (e) {
       log(`follower: error: ${(e as Error).message}; retry in ${backoff}ms`);

@@ -23,6 +23,8 @@
  *               for reorg detection, time, tx count).
  *   tokens      Live follower. Token metadata cache (name/symbol/decimals) for
  *               the library's resolveToken / resolveNftCollectionName.
+ *   contracts   contracts:sync worker. Sourcify verification cache per address
+ *               (verified, match kind, contract name); see contracts.ts.
  *   block_groups Live follower. Per-block aggregate: one row per
  *               (to, selector, bucket, status) with its tx count. Rolling-window
  *               stats (1h / 24h / 7d) are sums over this table.
@@ -158,6 +160,21 @@ CREATE TABLE IF NOT EXISTS tokens (
   decimals   INTEGER,
   ok         INTEGER NOT NULL DEFAULT 1,
   fetched_at TEXT    NOT NULL,
+  PRIMARY KEY (chain_id, address)
+);
+
+-- Sourcify verification cache, filled by the contracts:sync worker (one
+-- request per address against sourcify.dev/server/v2). verified 0 rows are
+-- rechecked after 24h, verified 1 rows after 30 days. Pruned with the blocks:
+-- a row survives only while some block in the retention window calls it.
+CREATE TABLE IF NOT EXISTS contracts (
+  chain_id    INTEGER NOT NULL,
+  address     TEXT    NOT NULL,   -- lowercase 0x
+  verified    INTEGER NOT NULL DEFAULT 0,
+  match       TEXT    CHECK (match IN ('exact_match', 'match')),
+  name        TEXT,               -- Sourcify compilation.name; NULL when unverified
+  checked_at  TEXT    NOT NULL,
+  verified_at TEXT,
   PRIMARY KEY (chain_id, address)
 );
 `;
