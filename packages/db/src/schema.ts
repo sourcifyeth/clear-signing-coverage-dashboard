@@ -26,8 +26,14 @@
  *   contracts   follower (background Sourcify sync). Verification cache per address
  *               (verified, match kind, contract name); see contracts.ts.
  *   block_groups Live follower. Per-block aggregate: one row per
- *               (to, selector, bucket, status) with its tx count. Rolling-window
- *               stats (1h / 24h / 7d) are sums over this table.
+ *               (to, selector, bucket, status) with its tx count. Source for
+ *               the window totals below and for per-block stats.
+ *   window_groups Live follower. Running totals per rolling window (1h / 24h /
+ *               7d): one row per (to, selector, bucket, status), kept in step
+ *               with each block (add the new one, subtract the expired ones).
+ *               The summary and ranking read these; see windows.ts.
+ *   window_meta Live follower. Per window: included block range, block count,
+ *               tx total and the end time.
  */
 
 export const SCHEMA_SQL = `
@@ -161,6 +167,30 @@ CREATE TABLE IF NOT EXISTS tokens (
   ok         INTEGER NOT NULL DEFAULT 1,
   fetched_at TEXT    NOT NULL,
   PRIMARY KEY (chain_id, address)
+);
+
+-- Rolling-window running totals (see windows.ts). One row per window and
+-- (to, selector, bucket, status); tx_count is the sum over the blocks the
+-- window currently includes. Maintained inside insertBlock / deleteBlocksFrom.
+CREATE TABLE IF NOT EXISTS window_groups (
+  window     TEXT    NOT NULL,              -- '1h' | '24h' | '7d'
+  to_address TEXT    NOT NULL DEFAULT '',
+  selector   TEXT    NOT NULL,
+  bucket     TEXT    NOT NULL,
+  status     TEXT    NOT NULL DEFAULT '',
+  tx_count   INTEGER NOT NULL,
+  PRIMARY KEY (window, to_address, selector, bucket, status)
+);
+CREATE INDEX IF NOT EXISTS window_groups_bucket ON window_groups (window, bucket);
+CREATE INDEX IF NOT EXISTS window_groups_addr ON window_groups (window, to_address);
+
+CREATE TABLE IF NOT EXISTS window_meta (
+  window      TEXT PRIMARY KEY,
+  from_block  INTEGER,                      -- oldest included block (NULL = empty)
+  to_block    INTEGER,                      -- newest included block
+  block_count INTEGER NOT NULL DEFAULT 0,
+  tx_total    INTEGER NOT NULL DEFAULT 0,   -- sum of blocks.tx_count over the window
+  to_time     TEXT                          -- block_time of to_block; the window ends here
 );
 
 -- Sourcify verification cache, filled by the follower's background Sourcify sync (one

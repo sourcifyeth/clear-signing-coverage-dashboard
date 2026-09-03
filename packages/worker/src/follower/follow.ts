@@ -44,6 +44,7 @@ import {
   insertBlock,
   deleteBlocksFrom,
   pruneLive,
+  rebuildWindows,
   pruneContracts,
   blockHash,
   latestBlock,
@@ -67,7 +68,8 @@ const REORG_DEPTH = 8;
 const PRUNE_EVERY_BLOCKS = 100;
 
 const POLL_MS = Number(process.env.POLL_MS ?? 4000);
-const RETENTION_DAYS = Number(process.env.RETENTION_DAYS ?? 7);
+// At least 7: the 7d window needs its blocks kept until they expire from it.
+const RETENTION_DAYS = Math.max(7, Number(process.env.RETENTION_DAYS ?? 7));
 const REGISTRY_PATH = path.resolve(
   process.env.REGISTRY_PATH ?? path.resolve(__dirname, "../../../../../clear-signing-erc7730-registry"),
 );
@@ -140,6 +142,10 @@ async function main(): Promise<void> {
   const rpc = makeRpc(rpcCfg);
   const dbPath = defaultDbPath();
   const db = openDb(dbPath);
+  // Rolling-window running totals: recompute once from block_groups so an older
+  // database (or one that stopped mid-way) starts consistent; ms on a week of data.
+  const rebuilt = rebuildWindows(db);
+  log(`follower: window totals rebuilt in ${rebuilt.ms} ms (${rebuilt.rows} rows)`);
 
   let registryCommit: string | null = null;
   try {

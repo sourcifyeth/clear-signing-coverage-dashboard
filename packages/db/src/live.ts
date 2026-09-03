@@ -12,6 +12,15 @@ import type { Bucket, PracticalStatus } from "./write.js";
 import { computeRanking, rankingCurve, pct, type RankedContract } from "./ranking.js";
 import { STANDARD_TOKEN_SELECTORS_SQL, excludeSql, type ExcludeOptions } from "./selectors.js";
 import { getContracts } from "./contracts.js";
+import {
+  addBlockToWindows,
+  removeBlockFromWindows,
+  removeBlocksFromWindows,
+  minWindowFromBlock,
+  windowKeyForHours,
+  windowMeta,
+  windowBounds,
+} from "./windows.js";
 
 // ---------------------------------------------------------------------------
 // Write
@@ -92,7 +101,9 @@ export function insertBlock(db: Db, block: BlockIn, txs: LiveTxIn[], groups: Blo
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
   db.transaction(() => {
-    // A reprocessed block (reorg) replaces its previous rows.
+    // A reprocessed block (reorg) replaces its previous rows; its old groups
+    // leave the window totals first, while block_groups still has them.
+    removeBlockFromWindows(db, block.number);
     db.prepare("DELETE FROM tx_index WHERE block_number = ?").run(block.number);
     db.prepare("DELETE FROM block_groups WHERE block_number = ?").run(block.number);
     insBlock.run(
@@ -129,12 +140,16 @@ export function insertBlock(db: Db, block: BlockIn, txs: LiveTxIn[], groups: Blo
         g.txCount,
       );
     }
+    // Running window totals: add this block, drop the ones it pushes out.
+    addBlockToWindows(db, { number: block.number, timeIso: block.timeIso, txCount: block.txCount });
   })();
 }
 
 /** Remove every block >= `number` (and its tx / group rows). Used on reorgs. */
 export function deleteBlocksFrom(db: Db, number: number): number {
   return db.transaction((): number => {
+    // Window totals first: they read the groups that are about to go.
+    removeBlocksFromWindows(db, number);
     db.prepare("DELETE FROM tx_index WHERE block_number >= ?").run(number);
     db.prepare("DELETE FROM block_groups WHERE block_number >= ?").run(number);
     const res = db.prepare("DELETE FROM blocks WHERE number >= ?").run(number);
@@ -150,9 +165,16 @@ export function pruneLive(db: Db, days: number, now: Date = new Date()): number 
       .prepare("SELECT MAX(number) AS n FROM blocks WHERE block_time < ?")
       .get(cutoff) as { n: number | null };
     if (maxOld.n === null) return 0;
-    db.prepare("DELETE FROM tx_index WHERE block_number <= ?").run(maxOld.n);
-    db.prepare("DELETE FROM block_groups WHERE block_number <= ?").run(maxOld.n);
-    const res = db.prepare("DELETE FROM blocks WHERE number <= ?").run(maxOld.n);
+    // Never remove a block a window still includes: the window totals subtract
+    // a block's groups when it expires, so those rows must still exist then.
+    // (Matters when the follower is behind: a block can be older than the
+    // retention cutoff and still be inside the 7d window ending at the head.)
+    const keepFrom = minWindowFromBlock(db);
+    const upTo = keepFrom === null ? maxOld.n : Math.min(maxOld.n, keepFrom - 1);
+    if (upTo < 0) return 0;
+    db.prepare("DELETE FROM tx_index WHERE block_number <= ?").run(upTo);
+    db.prepare("DELETE FROM block_groups WHERE block_number <= ?").run(upTo);
+    const res = db.prepare("DELETE FROM blocks WHERE number <= ?").run(upTo);
     return Number(res.changes);
   })();
 }
@@ -236,17 +258,19 @@ const EMPTY_BUCKETS = (): Record<Bucket, number> => ({
 });
 
 /**
- * Rolling-window summary. The window ends at the latest processed block (not
- * wall-clock now), so a paused follower still shows its last complete window.
+ * Rolling-window summary, read from the running totals the follower keeps
+ * (`window_groups` / `window_meta`, see windows.ts). The window ends at the
+ * latest processed block (not wall-clock now), so a paused follower still
+ * shows its last complete window. `windowHours` must be 1, 24 or 168.
  */
 export function liveSummary(
   db: Db,
   windowHours: number,
   opts: { limit?: number; curvePoints?: number; chainId?: number } & ExcludeOptions = {},
 ): LiveSummary {
-  const latest = latestBlock(db);
-  const toIso = latest?.timeIso ?? new Date().toISOString();
-  const fromIso = new Date(new Date(toIso).getTime() - windowHours * 3_600_000).toISOString();
+  const key = windowKeyForHours(windowHours);
+  const meta = windowMeta(db, key);
+  const { fromIso, toIso } = windowBounds(meta, latestBlock(db)?.timeIso ?? new Date().toISOString());
   const limit = Math.max(1, Math.min(opts.limit ?? 200, 5000));
   const chainId = opts.chainId ?? 1;
   const filter = { excludeEth: !!opts.excludeEth, excludeToken: !!opts.excludeToken };
@@ -254,11 +278,7 @@ export function liveSummary(
   let notCoveredUnverified = 0;
   const verificationCoverage = { checked: 0, total: 0 };
 
-  const range = db
-    .prepare(
-      "SELECT MIN(number) AS lo, MAX(number) AS hi, COUNT(*) AS n, COALESCE(SUM(tx_count), 0) AS tx FROM blocks WHERE block_time >= ? AND block_time <= ?",
-    )
-    .get(fromIso, toIso) as { lo: number | null; hi: number | null; n: number; tx: number };
+  const range = { lo: meta.fromBlock, hi: meta.toBlock, n: meta.blockCount, tx: meta.txTotal };
 
   const buckets = EMPTY_BUCKETS();
   const practice = { passTx: 0, partialTx: 0, failedTx: 0, practicePct: 0 };
@@ -266,36 +286,28 @@ export function liveSummary(
   let notCovered: { toAddress: string; selector: string; txCount: number }[] = [];
 
   if (range.lo !== null && range.hi !== null) {
-    // block_groups carries block_time, so the window is a range on the covering
-    // index with no join to blocks. The exclusion clauses apply to every query
-    // here, so buckets, practice, and the ranking agree with each other.
+    // Every query is a scan of this window's rows only, no time predicate.
+    // The exclusion clauses apply to every query here, so buckets, practice,
+    // and the ranking agree with each other.
     const bucketRows = db
-      .prepare(
-        `SELECT bucket, SUM(tx_count) AS n FROM block_groups WHERE block_time >= ? AND block_time <= ?${ex} GROUP BY bucket`,
-      )
-      .all(fromIso, toIso) as { bucket: Bucket; n: number }[];
+      .prepare(`SELECT bucket, SUM(tx_count) AS n FROM window_groups WHERE window = ?${ex} GROUP BY bucket`)
+      .all(key) as { bucket: Bucket; n: number }[];
     for (const r of bucketRows) if (r.bucket in buckets) buckets[r.bucket] = r.n;
 
     native.ethTransfers = (
-      db
-        .prepare(
-          "SELECT COALESCE(SUM(tx_count), 0) AS n FROM block_groups WHERE block_time >= ? AND block_time <= ? AND bucket = 'eth_transfer'",
-        )
-        .get(fromIso, toIso) as { n: number }
+      db.prepare("SELECT COALESCE(SUM(tx_count), 0) AS n FROM window_groups WHERE window = ? AND bucket = 'eth_transfer'").get(key) as {
+        n: number;
+      }
     ).n;
     native.tokenTransfers = (
       db
-        .prepare(
-          `SELECT COALESCE(SUM(tx_count), 0) AS n FROM block_groups WHERE block_time >= ? AND block_time <= ? AND selector IN (${STANDARD_TOKEN_SELECTORS_SQL})`,
-        )
-        .get(fromIso, toIso) as { n: number }
+        .prepare(`SELECT COALESCE(SUM(tx_count), 0) AS n FROM window_groups WHERE window = ? AND selector IN (${STANDARD_TOKEN_SELECTORS_SQL})`)
+        .get(key) as { n: number }
     ).n;
 
     const statusRows = db
-      .prepare(
-        `SELECT status, SUM(tx_count) AS n FROM block_groups WHERE block_time >= ? AND block_time <= ? AND bucket = 'covered_theory'${ex} GROUP BY status`,
-      )
-      .all(fromIso, toIso) as { status: string; n: number }[];
+      .prepare(`SELECT status, SUM(tx_count) AS n FROM window_groups WHERE window = ? AND bucket = 'covered_theory'${ex} GROUP BY status`)
+      .all(key) as { status: string; n: number }[];
     for (const r of statusRows) {
       if (r.status === "pass") practice.passTx = r.n;
       else if (r.status === "partial") practice.partialTx = r.n;
@@ -307,30 +319,30 @@ export function liveSummary(
     notCovered = (
       db
         .prepare(
-          `SELECT to_address, selector, SUM(tx_count) AS n FROM block_groups
-           WHERE block_time >= ? AND block_time <= ? AND bucket = 'not_covered'${ex}
+          `SELECT to_address, selector, SUM(tx_count) AS n FROM window_groups
+           WHERE window = ? AND bucket = 'not_covered'${ex}
            GROUP BY to_address, selector`,
         )
-        .all(fromIso, toIso) as { to_address: string; selector: string; n: number }[]
+        .all(key) as { to_address: string; selector: string; n: number }[]
     ).map((r) => ({ toAddress: r.to_address, selector: r.selector, txCount: r.n }));
 
     // Sourcify verification split of the not-covered calls (cache-driven; see contracts.ts).
     notCoveredUnverified = (
       db
         .prepare(
-          `SELECT COALESCE(SUM(g.tx_count), 0) AS n FROM block_groups g
+          `SELECT COALESCE(SUM(g.tx_count), 0) AS n FROM window_groups g
            JOIN contracts k ON k.chain_id = ? AND k.address = g.to_address AND k.verified = 0
-           WHERE g.block_time >= ? AND g.block_time <= ? AND g.bucket = 'not_covered'${excludeSql(filter, "g")}`,
+           WHERE g.window = ? AND g.bucket = 'not_covered'${excludeSql(filter, "g")}`,
         )
-        .get(chainId, fromIso, toIso) as { n: number }
+        .get(chainId, key) as { n: number }
     ).n;
     const cov = db
       .prepare(
-        `SELECT COUNT(DISTINCT g.to_address) AS total, COUNT(DISTINCT k.address) AS checked FROM block_groups g
+        `SELECT COUNT(DISTINCT g.to_address) AS total, COUNT(DISTINCT k.address) AS checked FROM window_groups g
          LEFT JOIN contracts k ON k.chain_id = ? AND k.address = g.to_address
-         WHERE g.block_time >= ? AND g.block_time <= ? AND g.bucket = 'not_covered'${excludeSql(filter, "g")}`,
+         WHERE g.window = ? AND g.bucket = 'not_covered'${excludeSql(filter, "g")}`,
       )
-      .get(chainId, fromIso, toIso) as { total: number; checked: number };
+      .get(chainId, key) as { total: number; checked: number };
     verificationCoverage.total = cov.total;
     verificationCoverage.checked = cov.checked;
   }
@@ -755,9 +767,8 @@ export function liveRanking(
   windowHours: number,
   opts: { by: "contract" | "function"; limit?: number; offset?: number; chainId?: number; verifiedOnly?: boolean } & ExcludeOptions,
 ): LiveRanking {
-  const latest = latestBlock(db);
-  const toIso = latest?.timeIso ?? new Date().toISOString();
-  const fromIso = new Date(new Date(toIso).getTime() - windowHours * 3_600_000).toISOString();
+  const key = windowKeyForHours(windowHours);
+  const { fromIso, toIso } = windowBounds(windowMeta(db, key), latestBlock(db)?.timeIso ?? new Date().toISOString());
   const limit = Math.max(1, Math.min(opts.limit ?? 100, 1000));
   const offset = Math.max(0, Math.floor(opts.offset ?? 0));
   const chainId = opts.chainId ?? 1;
@@ -766,17 +777,17 @@ export function liveRanking(
   const verifiedSql = opts.verifiedOnly
     ? ` AND to_address IN (SELECT address FROM contracts WHERE chain_id = ${Math.floor(Number(chainId))} AND verified = 1)`
     : "";
-  // Queries that join coverage/signatures need the block_groups columns
+  // Queries that join coverage/signatures need the window_groups columns
   // qualified, since those tables have a `selector` column too.
   const whereFor = (alias: string) => {
     const p = alias ? `${alias}.` : "";
-    return `${p}block_time >= ? AND ${p}block_time <= ? AND ${p}bucket IN ${CALL_BUCKETS_SQL}${excludeSql(opts, alias)}${verifiedSql.replace("to_address", `${p}to_address`)}`;
+    return `${p}window = ? AND ${p}bucket IN ${CALL_BUCKETS_SQL}${excludeSql(opts, alias)}${verifiedSql.replace("to_address", `${p}to_address`)}`;
   };
   const where = whereFor("");
   const whereG = whereFor("g");
 
   const totalTx = (
-    db.prepare(`SELECT COALESCE(SUM(tx_count), 0) AS n FROM block_groups WHERE ${where}`).get(fromIso, toIso) as {
+    db.prepare(`SELECT COALESCE(SUM(tx_count), 0) AS n FROM window_groups WHERE ${where}`).get(key) as {
       n: number;
     }
   ).n;
@@ -792,31 +803,31 @@ export function liveRanking(
           db
             .prepare(
               `SELECT COALESCE(SUM(n), 0) AS n FROM (
-                 SELECT SUM(tx_count) AS n FROM block_groups WHERE ${where} GROUP BY ${groupBy} ORDER BY n DESC LIMIT ?
+                 SELECT SUM(tx_count) AS n FROM window_groups WHERE ${where} GROUP BY ${groupBy} ORDER BY n DESC, ${groupBy} LIMIT ?
                )`,
             )
-            .get(fromIso, toIso, offset) as { n: number }
+            .get(key, offset) as { n: number }
         ).n;
 
   if (opts.by === "function") {
     const total = (
       db
-        .prepare(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM block_groups WHERE ${where} GROUP BY to_address, selector)`)
-        .get(fromIso, toIso) as { n: number }
+        .prepare(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM window_groups WHERE ${where} GROUP BY to_address, selector)`)
+        .get(key) as { n: number }
     ).n;
     const rows = db
       .prepare(
         `SELECT g.to_address, g.selector, MAX(g.bucket) AS bucket, SUM(g.tx_count) AS n,
                 c.function_sig, c.entity, s.name AS sig_name
-         FROM block_groups g
+         FROM window_groups g
          LEFT JOIN coverage c ON c.chain_id = ? AND c.address = g.to_address AND c.selector = g.selector
          LEFT JOIN signatures s ON s.selector = g.selector
          WHERE ${whereG}
          GROUP BY g.to_address, g.selector
-         ORDER BY n DESC
+         ORDER BY n DESC, g.to_address, g.selector
          LIMIT ? OFFSET ?`,
       )
-      .all(chainId, fromIso, toIso, limit, offset) as {
+      .all(chainId, key, limit, offset) as {
       to_address: string;
       selector: string;
       bucket: Bucket;
@@ -844,7 +855,7 @@ export function liveRanking(
   }
 
   const total = (
-    db.prepare(`SELECT COUNT(DISTINCT to_address) AS n FROM block_groups WHERE ${where}`).get(fromIso, toIso) as {
+    db.prepare(`SELECT COUNT(DISTINCT to_address) AS n FROM window_groups WHERE ${where}`).get(key) as {
       n: number;
     }
   ).n;
@@ -853,13 +864,13 @@ export function liveRanking(
       `SELECT to_address, SUM(tx_count) AS n,
               SUM(CASE WHEN bucket = 'covered_theory' THEN tx_count ELSE 0 END) AS covered,
               COUNT(DISTINCT selector) AS selectors
-       FROM block_groups
+       FROM window_groups
        WHERE ${where}
        GROUP BY to_address
-       ORDER BY n DESC
+       ORDER BY n DESC, to_address
        LIMIT ? OFFSET ?`,
     )
-    .all(fromIso, toIso, limit, offset) as { to_address: string; n: number; covered: number; selectors: number }[];
+    .all(key, limit, offset) as { to_address: string; n: number; covered: number; selectors: number }[];
   if (rows.length === 0) return { window, by: "contract", totalTx, total, ...page, contracts: [] };
 
   const addrs = rows.map((r) => r.to_address);
@@ -876,14 +887,14 @@ export function liveRanking(
     .prepare(
       `SELECT g.to_address, g.selector, MAX(g.bucket) AS bucket, SUM(g.tx_count) AS n,
               c.function_sig, s.name AS sig_name
-       FROM block_groups g
+       FROM window_groups g
        LEFT JOIN coverage c ON c.chain_id = ? AND c.address = g.to_address AND c.selector = g.selector
        LEFT JOIN signatures s ON s.selector = g.selector
        WHERE ${whereG} AND g.to_address IN (${inList})
        GROUP BY g.to_address, g.selector
-       ORDER BY n DESC`,
+       ORDER BY n DESC, g.selector`,
     )
-    .all(chainId, fromIso, toIso, ...addrs) as {
+    .all(chainId, key, ...addrs) as {
     to_address: string;
     selector: string;
     bucket: Bucket;
