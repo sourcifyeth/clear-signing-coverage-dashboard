@@ -33,7 +33,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { format } from "@ethereum-sourcify/clear-signing";
 import { createFilesystemResolver } from "@ethereum-sourcify/clear-signing/filesystem";
-import type { DisplayModel } from "@ethereum-sourcify/clear-signing";
+import type { DisplayModel, ExternalDataProvider } from "@ethereum-sourcify/clear-signing";
 import {
   openDb,
   defaultDbPath,
@@ -54,6 +54,7 @@ import { bucketFor } from "../classify.js";
 import { classifyModel, intentToString } from "../practical.js";
 import { makeRpc, rpcFromEnv, type RpcBlock, type RpcTx } from "./rpc.js";
 import { SignatureCache } from "./signatures.js";
+import { TokenCache, createExternalDataProvider } from "./externalData.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CHAIN_ID = 1;
@@ -81,23 +82,11 @@ function selectorOf(input: string): string {
   return input.length >= 10 ? input.slice(0, 10).toLowerCase() : input.toLowerCase();
 }
 
-/**
- * What the library asks the "wallet" for. Chain info is static, so native
- * amounts (`format: "amount"`, e.g. WETH deposit) print as "0.05 ETH" instead
- * of raw wei with an UNKNOWN_CHAIN warning. Token metadata (`tokenAmount`)
- * still needs the token cache and stays unresolved for now.
- */
-const EXTERNAL_DATA: NonNullable<Parameters<typeof format>[1]>["externalDataProvider"] = {
-  resolveChainInfo: async (chainId) =>
-    chainId === CHAIN_ID
-      ? { name: "Ethereum Mainnet", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } }
-      : null,
-};
-
 async function classifyTx(
   t: RpcTx,
   cov: CoverageLookup,
   resolverOptions: NonNullable<Parameters<typeof format>[1]>["descriptorResolverOptions"],
+  externalDataProvider: ExternalDataProvider,
 ): Promise<Classified> {
   const to = t.to ? t.to.toLowerCase() : null;
   const selector = selectorOf(t.input);
@@ -115,7 +104,7 @@ async function classifyTx(
     }
     model = await format(
       { chainId: CHAIN_ID, to, data: t.input, value, from: t.from },
-      { descriptorResolverOptions: resolverOptions, externalDataProvider: EXTERNAL_DATA },
+      { descriptorResolverOptions: resolverOptions, externalDataProvider },
     );
   } catch (e) {
     model = { warnings: [{ code: "UNEXPECTED_LIB_ERROR" as never, message: String(e) }] };
@@ -176,9 +165,13 @@ async function main(): Promise<void> {
   };
 
   const sigs = new SignatureCache(db);
+  const tokens = new TokenCache(db, rpc, CHAIN_ID);
+  const externalData = createExternalDataProvider({ db, rpc, chainId: CHAIN_ID, tokens });
 
   log(`follower: rpc=${rpc.label} db=${dbPath}`);
-  log(`follower: coverage ${cov.rowCount} rows (registry ${cov.registryCommit?.slice(0, 8) ?? "?"}), retention ${RETENTION_DAYS}d, poll ${POLL_MS}ms, ${sigs.size} cached signatures`);
+  log(
+    `follower: coverage ${cov.rowCount} rows (registry ${cov.registryCommit?.slice(0, 8) ?? "?"}), retention ${RETENTION_DAYS}d, poll ${POLL_MS}ms, ${sigs.size} cached signatures, ${tokens.size} cached tokens`,
+  );
 
   let stopping = false;
   process.on("SIGINT", () => {
@@ -228,7 +221,7 @@ async function main(): Promise<void> {
 
       const t0 = Date.now();
       const txs: LiveTxIn[] = [];
-      for (const t of block.transactions) txs.push((await classifyTx(t, cov, resolverOptions)).tx);
+      for (const t of block.transactions) txs.push((await classifyTx(t, cov, resolverOptions, externalData)).tx);
       const groups = groupRows(txs);
       const timeIso = new Date(Number(block.timestamp) * 1000).toISOString();
       insertBlock(
@@ -247,6 +240,9 @@ async function main(): Promise<void> {
       log(
         `block ${next} txs=${txs.length} eth=${counts.eth_transfer} cov=${counts.covered_theory}(${st.pass}/${st.partial}/${st.failed}) tok=${counts.token_native} not=${counts.not_covered} new=${counts.contract_creation} lag=${head - next} ${Date.now() - t0}ms`,
       );
+
+      const newTokens = tokens.drainLookups();
+      if (newTokens) log(`follower: looked up ${newTokens} new tokens on-chain (${tokens.size} cached)`);
 
       // Resolve function names for the selectors in this block (cached; one
       // request per new batch). A failure here must not stall the follower.

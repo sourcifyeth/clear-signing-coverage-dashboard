@@ -21,6 +21,8 @@
  *               block follower.
  *   blocks      Live follower. One row per processed block (hash + parent hash
  *               for reorg detection, time, tx count).
+ *   tokens      Live follower. Token metadata cache (name/symbol/decimals) for
+ *               the library's resolveToken / resolveNftCollectionName.
  *   block_groups Live follower. Per-block aggregate: one row per
  *               (to, selector, bucket, status) with its tx count. Rolling-window
  *               stats (1h / 24h / 7d) are sums over this table.
@@ -141,6 +143,22 @@ CREATE TABLE IF NOT EXISTS signatures (
   name       TEXT,
   verified   INTEGER NOT NULL DEFAULT 0,
   fetched_at TEXT    NOT NULL
+);
+
+-- Token metadata cache, filled by the follower's ExternalDataProvider from
+-- eth_call (name / symbol / decimals). kind 'erc20' has decimals, 'erc721' has
+-- a name only, 'none' is a negative entry (ok = 0) retried after a week.
+-- Never pruned: a few hundred rows on mainnet.
+CREATE TABLE IF NOT EXISTS tokens (
+  chain_id   INTEGER NOT NULL,
+  address    TEXT    NOT NULL,   -- lowercase 0x
+  kind       TEXT    NOT NULL CHECK (kind IN ('erc20', 'erc721', 'none')),
+  name       TEXT,
+  symbol     TEXT,
+  decimals   INTEGER,
+  ok         INTEGER NOT NULL DEFAULT 1,
+  fetched_at TEXT    NOT NULL,
+  PRIMARY KEY (chain_id, address)
 );
 `;
 
