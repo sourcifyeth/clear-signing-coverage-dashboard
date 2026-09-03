@@ -78,7 +78,6 @@ function TxBody({ row }: { row: LiveTxDetail }) {
   return (
     <>
       <div className="modalHead">
-        <span className={`tickIcon big ${icon.cls ?? ""}`}>{icon.glyph}</span>
         <div>
           <div className="modalTitle">
             Transaction <span className="mono">{row.hash.slice(0, 10)}…{row.hash.slice(-6)}</span>{" "}
@@ -86,8 +85,9 @@ function TxBody({ row }: { row: LiveTxDetail }) {
               Explorer ↗
             </a>
           </div>
-          <div className="muted small">
-            {icon.tip} · block {fmtInt(row.blockNumber)} · {row.blockTimeIso.replace("T", " ").replace(".000Z", " UTC")}
+          <div className="muted small statusLine">
+            <span className={`tickIcon ${icon.cls ?? ""}`}>{icon.glyph}</span> {icon.tip} · block {fmtInt(row.blockNumber)} ·{" "}
+            {row.blockTimeIso.replace("T", " ").replace(".000Z", " UTC")}
           </div>
         </div>
       </div>

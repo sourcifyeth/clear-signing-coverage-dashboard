@@ -1434,3 +1434,14 @@ footer {
   margin-left: 4px;
   vertical-align: middle;
 }
+
+/* tx modal: status icon + text under the title */
+.modalHead .statusLine {
+  margin-top: 4px;
+}
+.modalHead .statusLine .tickIcon {
+  display: inline;
+  width: auto;
+  font-size: 15px;
+  vertical-align: -1px;
+}
