@@ -151,7 +151,7 @@ function Value({ value, param }: { value: unknown; param: ParamLike }) {
     return (
       <>
         <div className="bytesBox mono">{hex}</div>
-        <div className="muted small">{bytes.toLocaleString()} bytes</div>
+        <div className="muted byteCount">{bytes.toLocaleString()} bytes</div>
       </>
     );
   }

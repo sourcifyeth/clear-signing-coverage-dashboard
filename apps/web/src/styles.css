@@ -1720,3 +1720,10 @@ footer {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
+
+/* byte count under a bytes box: very small */
+.byteCount {
+  font-size: 10px;
+  line-height: 1.4;
+  margin-top: 2px;
+}
