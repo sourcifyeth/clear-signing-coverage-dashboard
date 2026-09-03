@@ -171,7 +171,7 @@ function TxBody({ row }: { row: LiveTxDetail }) {
       </div>
 
       <Result row={row} />
-      <RawTxSection hash={row.hash} descriptorPath={row.descriptorPath} />
+      <RawTxSection hash={row.hash} descriptorPath={row.descriptorPath} functionSig={row.functionSig} />
     </>
   );
 }

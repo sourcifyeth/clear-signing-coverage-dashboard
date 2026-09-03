@@ -83,6 +83,49 @@ async function fromDescriptor(descriptorPath: string): Promise<AbiResult | null>
   return Array.isArray(abi) ? { abi: abi as Abi, source: "descriptor", implementations: [] } : null;
 }
 
+// ---------------------------------------------------------------------------
+// Selector -> text signatures (the fallback when no ABI matches)
+
+const FOURBYTE_LOOKUP = "https://api.4byte.sourcify.dev/signature-database/v1/lookup";
+
+interface FourByteEntry {
+  name: string;
+  filtered: boolean;
+  hasVerifiedContract: boolean;
+}
+interface FourByteResponse {
+  ok: boolean;
+  result?: { function?: Record<string, FourByteEntry[] | null> };
+}
+
+const sigCache = new Map<string, Promise<string[]>>();
+
+/**
+ * Candidate text signatures for a selector from Sourcify's 4-byte database,
+ * best first: entries seen in a verified contract, then the rest in the
+ * database's order. Empty when unknown. Never throws; cached per selector.
+ */
+export function lookupSignatures(selector: string): Promise<string[]> {
+  const sel = selector.toLowerCase();
+  const hit = sigCache.get(sel);
+  if (hit) return hit;
+  const p = (async () => {
+    try {
+      const res = await fetch(`${FOURBYTE_LOOKUP}?function=${sel}&filter=true`);
+      if (!res.ok) return [];
+      const body = (await res.json()) as FourByteResponse;
+      const entries = body.ok ? (body.result?.function?.[sel] ?? []) : [];
+      const verified = entries.filter((e) => e.hasVerifiedContract).map((e) => e.name);
+      const rest = entries.filter((e) => !e.hasVerifiedContract).map((e) => e.name);
+      return [...new Set([...verified, ...rest])];
+    } catch {
+      return [];
+    }
+  })();
+  sigCache.set(sel, p);
+  return p;
+}
+
 /**
  * The ABI for a contract, or null when neither Sourcify nor the descriptor has
  * one. Never throws.

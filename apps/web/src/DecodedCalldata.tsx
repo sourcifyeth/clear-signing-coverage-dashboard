@@ -1,19 +1,29 @@
 /**
- * "ABI decoded" view of a transaction's calldata: the matching function's
- * signature and each argument by name and type, decoded with viem against the
- * contract's ABI (Sourcify first, then the descriptor's inline ABI; see abi.ts).
+ * "Decoded" view of a transaction's calldata: the matching function's
+ * signature and each argument by name and type, decoded with viem.
+ *
+ * Decoding order:
+ *   1. the contract's ABI (Sourcify, following proxies; else the descriptor's
+ *      inline ABI; see abi.ts) — argument names are known;
+ *   2. a text signature: first the one the live row already carries
+ *      (`functionSig`, from the descriptor or the follower's 4byte cache), then
+ *      the candidates 4byte.sourcify.dev returns for the selector. Arguments
+ *      are labelled by index and type only.
+ *
  * Ported from the clear-signing playground's DecodedCalldata component.
  */
 
 import { useEffect, useState } from "react";
-import { decodeFunctionData, toFunctionSelector, type Abi, type AbiFunction, type Hex } from "viem";
-import { fetchAbi, type AbiResult } from "./abi.ts";
+import { decodeFunctionData, parseAbiItem, toFunctionSelector, type Abi, type AbiFunction, type Hex } from "viem";
+import { fetchAbi, lookupSignatures, type AbiResult } from "./abi.ts";
+import { canonicalSig } from "./txMeta.ts";
+
+type Source = AbiResult["source"] | "signature";
 
 type Status =
   | { kind: "loading" }
-  | { kind: "no-abi" }
-  | { kind: "no-match"; selector: string; source: AbiResult["source"] }
-  | { kind: "decoded"; fn: AbiFunction; args: readonly unknown[]; source: AbiResult["source"]; implementations: string[] };
+  | { kind: "failed"; selector: string }
+  | { kind: "decoded"; fn: AbiFunction; args: readonly unknown[]; source: Source };
 
 /** The ABI function whose selector matches the calldata (exact, so overloads pick right). */
 function functionForSelector(abi: Abi, selector: string): AbiFunction | undefined {
@@ -29,16 +39,49 @@ function functionForSelector(abi: Abi, selector: string): AbiFunction | undefine
   return undefined;
 }
 
-function decode(found: AbiResult, input: string): Status {
-  const selector = input.slice(0, 10);
-  const fn = functionForSelector(found.abi, selector);
-  if (!fn) return { kind: "no-match", selector, source: found.source };
+function decodeWith(fn: AbiFunction, input: string): readonly unknown[] | null {
   try {
     const { args } = decodeFunctionData({ abi: [fn], data: input as Hex });
-    return { kind: "decoded", fn, args: (args ?? []) as readonly unknown[], source: found.source, implementations: found.implementations };
+    return (args ?? []) as readonly unknown[];
   } catch {
-    return { kind: "no-match", selector, source: found.source };
+    return null;
   }
+}
+
+/** A text signature ("transfer(address,uint256)") as an ABI function, if it parses and matches the selector. */
+function functionFromSignature(sig: string, selector: string): AbiFunction | null {
+  for (const text of [sig, canonicalSig(sig)]) {
+    try {
+      const item = parseAbiItem(`function ${text}`);
+      if (item.type === "function" && toFunctionSelector(item).toLowerCase() === selector.toLowerCase()) return item;
+    } catch {
+      /* not parseable in this form */
+    }
+  }
+  return null;
+}
+
+async function decodeCalldata(chainId: number, address: string, input: string, descriptorPath: string | null, functionSig: string | null): Promise<Status> {
+  const selector = input.slice(0, 10);
+
+  // 1. ABI
+  const found = await fetchAbi(chainId, address, descriptorPath);
+  if (found) {
+    const fn = functionForSelector(found.abi, selector);
+    const args = fn ? decodeWith(fn, input) : null;
+    if (fn && args) return { kind: "decoded", fn, args, source: found.source };
+  }
+
+  // 2. text signatures: the row's own first, then 4byte
+  const candidates: string[] = [];
+  if (functionSig && functionSig.includes("(")) candidates.push(functionSig);
+  candidates.push(...(await lookupSignatures(selector)));
+  for (const sig of new Set(candidates)) {
+    const fn = functionFromSignature(sig, selector);
+    const args = fn ? decodeWith(fn, input) : null;
+    if (fn && args) return { kind: "decoded", fn, args, source: "signature" };
+  }
+  return { kind: "failed", selector };
 }
 
 export function signatureOf(fn: AbiFunction): string {
@@ -101,10 +144,11 @@ function Value({ value, param }: { value: unknown; param: ParamLike }) {
   );
 }
 
-const SOURCE_NOTE: Record<AbiResult["source"], string> = {
-  sourcify: "ABI from Sourcify",
-  "sourcify+implementation": "ABI from Sourcify (proxy, decoded with the implementation's ABI)",
-  descriptor: "ABI from the ERC-7730 descriptor",
+const SOURCE_NOTE: Record<Source, string> = {
+  sourcify: "Decoded with the verified ABI from Sourcify",
+  "sourcify+implementation": "Decoded with the verified ABI from Sourcify (proxy; implementation ABI)",
+  descriptor: "Decoded with the ABI in the ERC-7730 descriptor",
+  signature: "Decoded from the function signature (4byte.sourcify.dev); parameter names are not known",
 };
 
 export function DecodedCalldata({
@@ -112,33 +156,31 @@ export function DecodedCalldata({
   address,
   input,
   descriptorPath,
+  functionSig,
 }: {
   chainId: number;
   address: string;
   input: string;
   descriptorPath: string | null;
+  /** the row's known signature, tried before asking 4byte */
+  functionSig: string | null;
 }) {
   const [status, setStatus] = useState<Status>({ kind: "loading" });
 
   useEffect(() => {
     let cancelled = false;
     setStatus({ kind: "loading" });
-    void fetchAbi(chainId, address, descriptorPath).then((found) => {
-      if (cancelled) return;
-      setStatus(found ? decode(found, input) : { kind: "no-abi" });
-    });
+    void decodeCalldata(chainId, address, input, descriptorPath, functionSig).then((s) => !cancelled && setStatus(s));
     return () => {
       cancelled = true;
     };
-  }, [chainId, address, input, descriptorPath]);
+  }, [chainId, address, input, descriptorPath, functionSig]);
 
-  if (status.kind === "loading") return <div className="muted small">Fetching ABI…</div>;
-  if (status.kind === "no-abi")
-    return <div className="muted small">No ABI found: the contract is not verified on Sourcify and the descriptor carries no inline ABI.</div>;
-  if (status.kind === "no-match")
+  if (status.kind === "loading") return <div className="muted small">Decoding…</div>;
+  if (status.kind === "failed")
     return (
       <div className="muted small">
-        No function in the ABI matches selector <span className="mono">{status.selector}</span> ({SOURCE_NOTE[status.source]}).
+        Could not decode: no verified ABI and no known signature for <span className="mono">{status.selector}</span>
       </div>
     );
 

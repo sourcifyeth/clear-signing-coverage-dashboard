@@ -2,7 +2,7 @@
  * "Raw transaction" section of the transaction modal: the transaction as the
  * node has it, fetched on demand from /api/live/tx/:hash/raw (the follower
  * never stores calldata, value or sender). Calldata is shown as hex or, for
- * calls, ABI-decoded (see DecodedCalldata.tsx). Ported from the playground's
+ * calls, decoded (see DecodedCalldata.tsx). Ported from the playground's
  * RawTransactionView.
  */
 
@@ -67,7 +67,7 @@ async function loadRaw(hash: string): Promise<Load> {
   return { kind: "ok", tx: (await res.json()) as RawTx };
 }
 
-export function RawTxSection({ hash, descriptorPath }: { hash: string; descriptorPath: string | null }) {
+export function RawTxSection({ hash, descriptorPath, functionSig }: { hash: string; descriptorPath: string | null; functionSig: string | null }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [mode, setMode] = useState<CalldataMode>(loadMode);
   const [full, setFull] = useState(false);
@@ -92,7 +92,7 @@ export function RawTxSection({ hash, descriptorPath }: { hash: string; descripto
       <div className="rawHead">Raw transaction</div>
       {load.kind === "loading" && <div className="muted small">Loading from the node…</div>}
       {load.kind === "error" && <div className="muted small rawError">{load.message}</div>}
-      {load.kind === "ok" && <RawRows tx={load.tx} descriptorPath={descriptorPath} mode={mode} onMode={pick} full={full} setFull={setFull} />}
+      {load.kind === "ok" && <RawRows tx={load.tx} descriptorPath={descriptorPath} functionSig={functionSig} mode={mode} onMode={pick} full={full} setFull={setFull} />}
     </div>
   );
 }
@@ -100,6 +100,7 @@ export function RawTxSection({ hash, descriptorPath }: { hash: string; descripto
 function RawRows({
   tx,
   descriptorPath,
+  functionSig,
   mode,
   onMode,
   full,
@@ -107,6 +108,7 @@ function RawRows({
 }: {
   tx: RawTx;
   descriptorPath: string | null;
+  functionSig: string | null;
   mode: CalldataMode;
   onMode: (m: CalldataMode) => void;
   full: boolean;
@@ -154,12 +156,12 @@ function RawRows({
                 className={`seg ${mode === "decoded" ? "on" : ""}`}
                 onClick={() => onMode("decoded")}
               >
-                ABI decoded
+                Decoded
               </button>
             </div>
           )}
           {showDecoded ? (
-            <DecodedCalldata chainId={CHAIN_ID} address={tx.to as string} input={tx.input} descriptorPath={descriptorPath} />
+            <DecodedCalldata chainId={CHAIN_ID} address={tx.to as string} input={tx.input} descriptorPath={descriptorPath} functionSig={functionSig} />
           ) : tx.input === "0x" ? (
             <span className="muted">none (0x)</span>
           ) : (
