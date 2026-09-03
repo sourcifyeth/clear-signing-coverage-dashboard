@@ -108,6 +108,8 @@ export interface LiveTx {
   warnings: { code: string; message: string }[];
   /** one-line intent the library produced (covered txs only) */
   intent: string | null;
+  /** the whole clear-signed text: intent plus every field, "Label: value" joined by " · " */
+  displayText: string | null;
   entity: string | null;
   functionSig: string | null;
 }

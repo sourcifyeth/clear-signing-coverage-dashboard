@@ -53,6 +53,7 @@ import { loadRegistryIndex } from "../coverage/registryIndex.js";
 import { bucketFor } from "../classify.js";
 import { classifyModel, intentToString } from "../practical.js";
 import { makeRpc, rpcFromEnv, type RpcBlock, type RpcTx } from "./rpc.js";
+import { SignatureCache } from "./signatures.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CHAIN_ID = 1;
@@ -161,8 +162,10 @@ async function main(): Promise<void> {
     resolver: createFilesystemResolver({ index: loadRegistryIndex(REGISTRY_PATH), descriptorDirectory: REGISTRY_PATH }),
   };
 
+  const sigs = new SignatureCache(db);
+
   log(`follower: rpc=${rpc.label} db=${dbPath}`);
-  log(`follower: coverage ${cov.rowCount} rows (registry ${cov.registryCommit?.slice(0, 8) ?? "?"}), retention ${RETENTION_DAYS}d, poll ${POLL_MS}ms`);
+  log(`follower: coverage ${cov.rowCount} rows (registry ${cov.registryCommit?.slice(0, 8) ?? "?"}), retention ${RETENTION_DAYS}d, poll ${POLL_MS}ms, ${sigs.size} cached signatures`);
 
   let stopping = false;
   process.on("SIGINT", () => {
@@ -231,6 +234,15 @@ async function main(): Promise<void> {
       log(
         `block ${next} txs=${txs.length} eth=${counts.eth_transfer} cov=${counts.covered_theory}(${st.pass}/${st.partial}/${st.failed}) tok=${counts.token_native} not=${counts.not_covered} new=${counts.contract_creation} lag=${head - next} ${Date.now() - t0}ms`,
       );
+
+      // Resolve function names for the selectors in this block (cached; one
+      // request per new batch). A failure here must not stall the follower.
+      try {
+        const looked = await sigs.ensure(txs.map((t) => t.selector));
+        if (looked) log(`follower: looked up ${looked} new selectors on 4byte.sourcify.dev (${sigs.size} cached)`);
+      } catch (e) {
+        log(`follower: signature lookup failed: ${(e as Error).message}`);
+      }
 
       processed++;
       next++;

@@ -312,6 +312,12 @@ export interface LiveTxOut {
   status: PracticalStatus | null;
   warnings: { code: string; message: string }[];
   intent: string | null;
+  /**
+   * The whole clear-signed text, built from the stored display model:
+   * the intent followed by every field as "Label: value", joined with " · ".
+   * Null when no model is stored (non-covered txs, or rows before the column existed).
+   */
+  displayText: string | null;
   entity: string | null;
   functionSig: string | null;
 }
@@ -333,15 +339,91 @@ interface RawLiveTx {
   status: PracticalStatus | null;
   warnings_json: string | null;
   intent: string | null;
+  display_json: string | null;
   entity: string | null;
   function_sig: string | null;
+  sig_name: string | null;
 }
 
 const LIVE_TX_SELECT = `
   SELECT t.tx_hash, t.block_number, t.block_hash, t.block_time, t.to_address, t.selector, t.bucket, t.status,
-         t.warnings_json, t.intent, c.entity, c.function_sig
+         t.warnings_json, t.intent, t.display_json, c.entity, c.function_sig, s.name AS sig_name
   FROM tx_index t
-  LEFT JOIN coverage c ON c.chain_id = ? AND c.address = t.to_address AND c.selector = t.selector`;
+  LEFT JOIN coverage c ON c.chain_id = ? AND c.address = t.to_address AND c.selector = t.selector
+  LEFT JOIN signatures s ON s.selector = t.selector`;
+
+// ---------------------------------------------------------------------------
+// Selector -> signature cache (filled by the follower from 4byte.sourcify.dev)
+
+export interface SignatureIn {
+  selector: string;
+  /** canonical signature, or null when the lookup found nothing */
+  name: string | null;
+  verified: boolean;
+}
+
+/**
+ * Selectors that need no lookup: known names, plus unknown ones looked up
+ * less than `retryAfterHours` ago.
+ */
+export function knownSelectors(db: Db, retryAfterHours = 24): Set<string> {
+  const cutoff = new Date(Date.now() - retryAfterHours * 3600_000).toISOString();
+  const rows = db
+    .prepare(`SELECT selector FROM signatures WHERE name IS NOT NULL OR fetched_at > ?`)
+    .all(cutoff) as { selector: string }[];
+  return new Set(rows.map((r) => r.selector));
+}
+
+export function upsertSignatures(db: Db, rows: SignatureIn[]): void {
+  if (rows.length === 0) return;
+  const now = new Date().toISOString();
+  const stmt = db.prepare(
+    `INSERT INTO signatures (selector, name, verified, fetched_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(selector) DO UPDATE SET name = excluded.name, verified = excluded.verified, fetched_at = excluded.fetched_at`,
+  );
+  const run = db.transaction((rs: SignatureIn[]) => {
+    for (const r of rs) stmt.run(r.selector.toLowerCase(), r.name, r.verified ? 1 : 0, now);
+  });
+  run(rows);
+}
+
+interface StoredField {
+  label?: string;
+  value?: unknown;
+  fields?: StoredField[];
+}
+
+/** Flatten fields and field groups into "Label: value" parts, in display order. */
+function fieldParts(fields: StoredField[] | undefined, out: string[] = []): string[] {
+  for (const f of fields ?? []) {
+    if (Array.isArray(f.fields)) fieldParts(f.fields, out);
+    else if (f.value !== undefined && f.value !== null) {
+      const v = typeof f.value === "string" ? f.value : JSON.stringify(f.value);
+      out.push(f.label ? `${f.label}: ${v}` : v);
+    }
+  }
+  return out;
+}
+
+/** Full clear-signed line from a stored display model, or null if there is none. */
+export function displayTextOf(displayJson: string | null, intent: string | null): string | null {
+  if (!displayJson) return null;
+  let d: { intent?: unknown; interpolatedIntent?: unknown; fields?: StoredField[]; rawCalldataFallback?: unknown };
+  try {
+    d = JSON.parse(displayJson);
+  } catch {
+    return intent;
+  }
+  if (d.rawCalldataFallback) return null;
+  const head =
+    typeof d.interpolatedIntent === "string"
+      ? d.interpolatedIntent
+      : typeof d.intent === "string"
+        ? d.intent
+        : intent ?? "";
+  const parts = fieldParts(d.fields);
+  return [head, ...parts].filter(Boolean).join(" · ") || null;
+}
 
 function toLiveTx(r: RawLiveTx): LiveTxOut {
   return {
@@ -354,8 +436,10 @@ function toLiveTx(r: RawLiveTx): LiveTxOut {
     status: r.status,
     warnings: r.warnings_json ? JSON.parse(r.warnings_json) : [],
     intent: r.intent,
+    displayText: displayTextOf(r.display_json, r.intent),
     entity: r.entity,
-    functionSig: r.function_sig,
+    // registry signature (has parameter names) first, else the 4byte lookup
+    functionSig: r.function_sig ?? r.sig_name,
   };
 }
 
@@ -391,8 +475,8 @@ export function recentTxs(
 /** One stored transaction with its library result, or undefined if not indexed. */
 export function liveTx(db: Db, hash: string, chainId = 1): LiveTxDetailOut | undefined {
   const r = db
-    .prepare(`${LIVE_TX_SELECT.replace("t.intent,", "t.intent, t.display_json,")} WHERE t.tx_hash = ?`)
-    .get(chainId, hash.toLowerCase()) as (RawLiveTx & { display_json: string | null }) | undefined;
+    .prepare(`${LIVE_TX_SELECT} WHERE t.tx_hash = ?`)
+    .get(chainId, hash.toLowerCase()) as RawLiveTx | undefined;
   if (!r) return undefined;
   return {
     ...toLiveTx(r),

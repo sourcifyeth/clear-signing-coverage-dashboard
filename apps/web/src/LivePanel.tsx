@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { LatestBlock, LiveBlockEvent, LiveSummary, LiveTx } from "./types.ts";
-import { BUCKET_COLOR, STATUS_COLOR, fmtInt, fmtPct, short, signablePct } from "./buckets.ts";
+import { STATUS_COLOR, fmtInt, fmtPct, short, signablePct } from "./buckets.ts";
 import { BucketBar, Toggle, Stat, numOr } from "./BucketBar.tsx";
 import { labelFor } from "./labels.ts";
 
@@ -45,6 +45,8 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
   const [activeHash, setActiveHash] = useState<string | null>(null);
   const winRef = useRef<Win>(win);
   const lastFetchRef = useRef(0);
+  /** hashes present at first load; rows not in here arrived live and get the entry animation */
+  const initialRef = useRef<Set<string> | null>(null);
 
   // 1s clock for the "Ns ago" label.
   useEffect(() => {
@@ -71,10 +73,12 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
           ]);
           setSummary(s);
           setTxs(recent);
+          initialRef.current = new Set((recent as LiveTx[]).map((t) => t.hash));
         }
       } catch {
         /* API down: the empty state below explains */
       } finally {
+        initialRef.current ??= new Set();
         setLoaded(true);
       }
     })();
@@ -206,6 +210,7 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
                 <TickerRow
                   key={t.hash}
                   tx={t}
+                  fresh={initialRef.current !== null && !initialRef.current.has(t.hash)}
                   active={activeHash === t.hash}
                   onClick={() => {
                     setActiveHash(t.hash);
@@ -228,42 +233,123 @@ function who(t: LiveTx): string {
   return labelFor(t.toAddress) ?? short(t.toAddress);
 }
 
-function what(t: LiveTx): string {
-  if (t.bucket === "eth_transfer") return "ETH transfer";
-  if (t.bucket === "contract_creation") return "";
-  if (t.functionSig) return t.functionSig.split("(")[0];
-  return t.selector;
+/**
+ * Canonical form of a signature: parameter names dropped, e.g.
+ * "transfer(address _to, uint256 _value)" -> "transfer(address,uint256)".
+ * Tuples keep their nesting. Already-canonical input passes through unchanged.
+ */
+export function canonicalSig(sig: string): string {
+  const open = sig.indexOf("(");
+  if (open < 0) return sig;
+  const name = sig.slice(0, open).trim();
+  const body = sig.slice(open + 1, sig.lastIndexOf(")"));
+  const parts: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of body) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (ch === "," && depth === 0) {
+      parts.push(cur);
+      cur = "";
+    } else cur += ch;
+  }
+  if (cur.trim()) parts.push(cur);
+  const types = parts.map((p) => {
+    const s = p.trim();
+    if (s.startsWith("(")) {
+      // tuple: "(address a, uint256 b)[] name" -> "(address,uint256)[]"
+      const end = s.lastIndexOf(")");
+      // keep only array suffixes such as "[]" or "[2]", drop the parameter name
+      const after = s.slice(end + 1).trim().match(/^(\[[^\]]*\])+/)?.[0] ?? "";
+      return canonicalSig(`_${s.slice(0, end + 1)}`).slice(1) + after;
+    }
+    return s.split(/\s+/)[0];
+  });
+  return `${name}(${types.join(",")})`;
 }
 
-function TickerRow({ tx: t, active, onClick }: { tx: LiveTx; active: boolean; onClick: () => void }) {
-  const creation = t.bucket === "contract_creation";
+/** Function column: the canonical signature when we know one, else nothing (the selector is shown next to it). */
+function fnName(t: LiveTx): string | null {
+  if (t.bucket === "eth_transfer") return "ETH transfer";
+  if (t.bucket === "contract_creation") return null;
+  return t.functionSig ? canonicalSig(t.functionSig) : null;
+}
+
+/**
+ * Row icon: what a wallet user gets for this transaction.
+ *   ✅ clear-signed by a descriptor   ⚠️ clear-signed with warnings
+ *   ❌ raw hex (no descriptor, or the library failed)
+ *   💸 token transfer / approve (wallet-native)   Ξ plain ETH transfer   📦 contract creation
+ * The explanation is a CSS tooltip (data-tip) so it shows at once on hover.
+ */
+function iconFor(t: LiveTx): { glyph: string; tip: string; cls?: string } {
+  switch (t.bucket) {
+    case "eth_transfer":
+      return { glyph: "Ξ", tip: "ETH transfer — wallets show this natively", cls: "eth" };
+    case "token_native":
+      return { glyph: "💸", tip: "Token transfer / approve — wallets show this natively" };
+    case "contract_creation":
+      return { glyph: "📦", tip: "Contract creation" };
+    case "covered_theory":
+      if (t.status === "failed") return { glyph: "❌", tip: "Descriptor exists, but the library failed" };
+      if (t.status === "partial") return { glyph: "⚠️", tip: "Clear-signed, with warnings" };
+      return { glyph: "✅", tip: "Clear-signed by an ERC-7730 descriptor" };
+    default:
+      return { glyph: "❌", tip: "Not clear-signable — the wallet shows raw hex" };
+  }
+}
+
+function TickerIcon({ tx: t }: { tx: LiveTx }) {
+  const { glyph, tip, cls } = iconFor(t);
   return (
-    <div className={`tickRow ${active ? "active" : ""}`} onClick={onClick} role="button" tabIndex={0}>
-      <span className="tickDots">
-        <span className="feedDot" style={{ background: BUCKET_COLOR[t.bucket] }} title={t.bucket} />
-        {t.status && (
-          <span className="feedDot" style={{ background: STATUS_COLOR[t.status] }} title={`library: ${t.status}`} />
-        )}
-      </span>
-      <span className="tickBlock mono muted">{fmtInt(t.blockNumber)}</span>
-      <span className="tickWho">{who(t)}</span>
-      <span className="tickFn mono">
+    <span className={`tickIcon ${cls ?? ""}`} data-tip={tip} aria-label={tip}>
+      {glyph}
+    </span>
+  );
+}
+
+function TickerRow({
+  tx: t,
+  fresh,
+  active,
+  onClick,
+}: {
+  tx: LiveTx;
+  fresh: boolean;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const creation = t.bucket === "contract_creation";
+  const signed = t.bucket === "covered_theory" && t.status !== "failed";
+  const dim = t.bucket === "not_covered" || creation || (t.bucket === "covered_theory" && t.status === "failed");
+  const cls = ["tickRow", active && "active", fresh && "fresh", signed && "signed", dim && "dim"]
+    .filter(Boolean)
+    .join(" ");
+  return (
+    <div className={cls} onClick={onClick} role="button" tabIndex={0}>
+      <TickerIcon tx={t} />
+      <span className="tickFn mono" title={t.functionSig ? `${t.functionSig}  ${t.selector}` : t.selector}>
         {t.bucket === "eth_transfer" || creation ? (
-          <span className="muted">{what(t)}</span>
+          <span className="muted">{fnName(t) ?? ""}</span>
         ) : (
           <a
             href={`https://4byte.sourcify.dev/?q=${t.selector}`}
             target="_blank"
             rel="noreferrer"
             onClick={(e) => e.stopPropagation()}
-            title={t.functionSig ?? t.selector}
           >
-            {what(t)}
+            {fnName(t) && <span className="fnName">{fnName(t)}</span>}
+            <span className="fnSel">{t.selector}</span>
           </a>
         )}
       </span>
-      <span className="tickIntent muted" title={t.intent ?? undefined}>
-        {t.intent ?? (t.warnings[0] ? t.warnings[0].code : "")}
+      <span className="tickBlock mono muted">{fmtInt(t.blockNumber)}</span>
+      <span className="tickWho">{who(t)}</span>
+      <span className={`tickIntent ${signed ? "" : "muted"}`} title={t.displayText ?? t.intent ?? undefined}>
+        {signed
+          ? t.displayText ?? t.intent ?? ""
+          : t.intent ?? (t.warnings[0] ? t.warnings[0].code : "")}
       </span>
       <a
         className="tickHash mono muted"

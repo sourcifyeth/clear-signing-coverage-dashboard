@@ -132,6 +132,16 @@ CREATE TABLE IF NOT EXISTS block_groups (
   tx_count     INTEGER NOT NULL,
   PRIMARY KEY (block_number, to_address, selector, status)
 );
+
+-- 4-byte selector -> canonical function signature, looked up once from
+-- api.4byte.sourcify.dev by the follower. name NULL = looked up, unknown
+-- (retried after a day). Never pruned: a few thousand small rows.
+CREATE TABLE IF NOT EXISTS signatures (
+  selector   TEXT PRIMARY KEY,
+  name       TEXT,
+  verified   INTEGER NOT NULL DEFAULT 0,
+  fetched_at TEXT    NOT NULL
+);
 `;
 
 /**

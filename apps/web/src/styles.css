@@ -560,7 +560,8 @@ body {
 }
 .tickRow {
   display: grid;
-  grid-template-columns: 26px 78px 150px 130px 1fr 78px;
+  /* icon | function | block | contract | clear-signed text | hash */
+  grid-template-columns: 28px minmax(180px, 250px) 78px 150px 1fr 78px;
   align-items: center;
   gap: 10px;
   padding: 7px 12px;
@@ -577,9 +578,73 @@ body {
 .tickRow.active {
   background: #10203a;
 }
-.tickDots {
-  display: flex;
-  gap: 4px;
+/* rows that arrived over the live stream slide in and flash once */
+.tickRow.fresh {
+  animation: arrive 0.7s ease-out;
+}
+@keyframes arrive {
+  0% {
+    opacity: 0;
+    transform: translateY(-10px);
+    background: rgba(74, 222, 128, 0.18);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(0);
+    background: rgba(74, 222, 128, 0.18);
+  }
+  100% {
+    background: transparent;
+  }
+}
+/* not clear-signable: fade the content, not the row, so the entry animation stays clean */
+.tickRow.dim > *:not(.tickIcon) {
+  opacity: 0.45;
+}
+/* clear-signed rows show the whole sentence the wallet would display */
+.tickRow.signed .tickIntent {
+  white-space: normal;
+  overflow: visible;
+  color: var(--text);
+  line-height: 1.4;
+}
+.tickIcon {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  cursor: default;
+}
+/* instant tooltip: native title has a ~1s delay */
+.tickIcon[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: #1e293b;
+  color: var(--text);
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+  opacity: 1;
+}
+.tickIcon.eth {
+  border-radius: 50%;
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  font-weight: 700;
+  font-size: 13px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 .tickBlock {
   font-size: 12px;
@@ -603,6 +668,14 @@ body {
 .tickFn a:hover {
   text-decoration: underline;
 }
+/* "transfer(address,uint256) 0xa9059cbb": name in link blue, selector lighter */
+.tickFn .fnName + .fnSel {
+  margin-left: 6px;
+}
+.tickFn .fnSel {
+  color: var(--muted);
+  font-size: 11px;
+}
 .tickIntent {
   font-size: 12px;
   overflow: hidden;
@@ -616,12 +689,17 @@ body {
 }
 @media (max-width: 760px) {
   .tickRow {
-    grid-template-columns: 26px 1fr 1fr;
+    grid-template-columns: 28px 1fr 1fr;
   }
   .tickBlock,
   .tickIntent,
   .tickHash {
     display: none;
+  }
+  .tickRow.signed .tickIntent {
+    display: block;
+    grid-column: 2 / -1;
+    font-size: 12px;
   }
 }
 

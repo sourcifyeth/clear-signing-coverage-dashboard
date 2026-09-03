@@ -162,6 +162,15 @@ Live endpoints on the API:
 The window in `summary` ends at the latest processed block, not at wall-clock
 now, so a stopped follower still reports its last complete window.
 
+Each row in `recent` carries `functionSig` and `displayText`. The signature
+comes from the registry descriptor for covered transactions, and from
+Sourcify's 4-byte database (`api.4byte.sourcify.dev`) for everything else. The
+follower looks up the selectors of each block once and caches them in the
+`signatures` table (unknown ones are retried after a day). After an upgrade,
+`npm run signatures:backfill` names the selectors that are already in
+`tx_index`. `displayText` is the whole clear-signed line built from the stored
+display model: the intent followed by every field as `Label: value`.
+
 ## Stage A — build the coverage set
 
 Reads the registry's published `index.calldata.json` (address → descriptor),
