@@ -126,18 +126,6 @@ export function RankingPanel({
     <section className="card">
       <div className="rankHead">
         <h3>Contracts by transaction count · last {win}</h3>
-        <label className="verifiedOnly small" title="Hide contracts that are not verified on Sourcify (no ABI, so no descriptor can be written)">
-          <input
-            type="checkbox"
-            checked={verifiedOnly}
-            onChange={(e) => {
-              setVerifiedOnly(e.target.checked);
-              saveVerifiedOnly(e.target.checked);
-              setPage(0);
-            }}
-          />{" "}
-          Verified only
-        </label>
       </div>
       <p className="muted small">
         Every contract called in the window, most transactions first. ✅ has an ERC-7730 descriptor
@@ -150,6 +138,22 @@ export function RankingPanel({
           </>
         )}
       </p>
+
+      <div className="tblFilter">
+        <label className={`verifiedOnly ${verifiedOnly ? "on" : ""}`} title="Hide contracts that are not verified on Sourcify (no ABI, so no descriptor can be written)">
+          <input
+            type="checkbox"
+            checked={verifiedOnly}
+            onChange={(e) => {
+              setVerifiedOnly(e.target.checked);
+              saveVerifiedOnly(e.target.checked);
+              setPage(0);
+            }}
+          />
+          <img src="/sourcify.png" alt="" />
+          Verified on Sourcify only
+        </label>
+      </div>
 
       {!data ? (
         <div className="muted small">{loading ? "Loading…" : "No data yet."}</div>
