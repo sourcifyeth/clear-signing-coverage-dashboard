@@ -286,17 +286,21 @@ export function LivePanel({
                     )}
                   </div>
                   <div className="toggles">
-                    <Toggle on disabled label={`Descriptors ${fmtPct(s.headline.theoryPctOfAll)}`} swatch="#4ade80" />
+                    {/* static chip: the descriptor-covered calls in this window, under the current toggles */}
+                    <span className="toggle chip" title="Calls covered by an ERC-7730 descriptor in this window">
+                      <span className="swatch" style={{ background: "#4ade80" }} />
+                      Descriptor calls · {fmtInt(s.buckets.covered_theory)}
+                    </span>
                     <Toggle
                       on={state.countEth}
                       onClick={() => state.setCountEth(!state.countEth)}
-                      label={`Include ETH transfers · ${fmtPct(s.allTx ? (s.native.ethTransfers / s.allTx) * 100 : 0)}`}
+                      label={`Include ETH transfers · ${fmtInt(s.native.ethTransfers)}`}
                       swatch="#a9bdee"
                     />
                     <Toggle
                       on={state.countToken}
                       onClick={() => state.setCountToken(!state.countToken)}
-                      label={`Include token transfers · ${fmtPct(s.allTx ? (s.native.tokenTransfers / s.allTx) * 100 : 0)}`}
+                      label={`Include token transfers / approvals · ${fmtInt(s.native.tokenTransfers)}`}
                       swatch="#7693da"
                     />
                   </div>
@@ -311,10 +315,7 @@ export function LivePanel({
                           .filter(Boolean)
                           .join(" and ")}
                       </b>
-                      , {fmtPct(s.allTx ? ((s.excluded.ethTransfers + s.excluded.tokenTransfers) / s.allTx) * 100 : 0)} of
-                      the {fmtInt(s.allTx)} transactions in this window. The percentage, the rankings, and the list below
-                      cover only the other <b>{fmtInt(s.totalTx)}</b> transactions: the calls that need a descriptor.
-                      {!state.countToken && " Token transfers to tokens that have a descriptor (for example Tether) are excluded too."}
+                      .{!state.countToken && " Token transfers to tokens that have a descriptor (for example Tether) are excluded too."}
                     </div>
                   )}
                 </div>

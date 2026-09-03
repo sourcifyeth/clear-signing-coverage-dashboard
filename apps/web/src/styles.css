@@ -304,6 +304,14 @@ button {
 .toggle:hover:not(:disabled) {
   border-color: var(--blue);
 }
+/* non-clickable chip in the toggle row: a label, not a button */
+.toggle.chip {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-soft);
+  cursor: default;
+  padding-left: 0;
+}
 .swatch {
   width: 10px;
   height: 10px;
@@ -1035,11 +1043,14 @@ footer {
 .contractName {
   font-weight: 600;
 }
-.regLink {
+.tbl a.regLink {
   display: block;
+  margin-top: 8px;
+  color: var(--muted);
   text-decoration: none;
 }
-.regLink:hover {
+.tbl a.regLink:hover {
+  color: var(--text-soft);
   text-decoration: underline;
 }
 
