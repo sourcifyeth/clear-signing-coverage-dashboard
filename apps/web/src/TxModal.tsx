@@ -19,15 +19,20 @@ import { fetchProxyInfo, type ProxyInfo } from "./abi.ts";
  */
 function ProxyBanner({ address }: { address: string }) {
   const [info, setInfo] = useState<ProxyInfo | null>(null);
+  const [showAll, setShowAll] = useState(false);
   useEffect(() => {
     let cancelled = false;
     setInfo(null);
+    setShowAll(false);
     void fetchProxyInfo(1, address).then((i) => !cancelled && setInfo(i));
     return () => {
       cancelled = true;
     };
   }, [address]);
   if (!info?.isProxy) return null;
+  const MAX_SHOWN = 3;
+  const impls = showAll ? info.implementations : info.implementations.slice(0, MAX_SHOWN);
+  const hiddenCount = info.implementations.length - impls.length;
   return (
     <div className="infoBanner" role="note">
       <span className="infoGlyph">ℹ️</span>
@@ -38,7 +43,7 @@ function ProxyBanner({ address }: { address: string }) {
           <>
             {" "}
             · implementation{info.implementations.length > 1 ? "s" : ""}{" "}
-            {info.implementations.map((impl, i) => (
+            {impls.map((impl, i) => (
               <span key={impl.address}>
                 {i > 0 && ", "}
                 {impl.name && <b>{impl.name} </b>}
@@ -47,6 +52,22 @@ function ProxyBanner({ address }: { address: string }) {
                 </a>
               </span>
             ))}
+            {hiddenCount > 0 && (
+              <>
+                {" "}
+                <button type="button" className="linkBtn small" onClick={() => setShowAll(true)}>
+                  Show all ({info.implementations.length})
+                </button>
+              </>
+            )}
+            {showAll && info.implementations.length > MAX_SHOWN && (
+              <>
+                {" "}
+                <button type="button" className="linkBtn small" onClick={() => setShowAll(false)}>
+                  Show less
+                </button>
+              </>
+            )}
           </>
         )}
       </span>
