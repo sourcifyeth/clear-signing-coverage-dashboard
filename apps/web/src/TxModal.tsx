@@ -199,7 +199,7 @@ function Result({ row }: { row: LiveTxDetail }) {
 
   return (
     <section className="csCard">
-      <div className="csCardTitle">What a wallet can show</div>
+      <div className="csCardTitle">Clear-signed display</div>
       {body}
     </section>
   );
@@ -210,10 +210,11 @@ function DecodeView({ model }: { model: DisplayModel }) {
   return (
     <div className="decode">
       <div className="muted small">
-        Rendered by the{" "}
+        What a wallet can show, rendered by the{" "}
         <a href={SDK_REPO} target="_blank" rel="noreferrer">
           Sourcify Clear-Signing SDK ↗
         </a>
+        .
         {fieldWarnings > 0 && (
           <span className="fieldWarnCount">
             {" "}
