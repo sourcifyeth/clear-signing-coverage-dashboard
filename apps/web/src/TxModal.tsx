@@ -11,8 +11,43 @@ import type { LiveTxDetail } from "./types.ts";
 import { fmtInt } from "./buckets.ts";
 import { canonicalSig, clip, CLIP_TEXT, contractName, contractUrl, iconFor, REGISTRY_REPO, SDK_REPO } from "./txMeta.ts";
 import { RawTxSection } from "./RawTxSection.tsx";
-import { fetchProxyInfo, type ProxyInfo } from "./abi.ts";
+import { fetchProxyInfo, fetchVerification, type ProxyInfo, type Verification } from "./abi.ts";
 import { explainWarning } from "./warningExplainer.ts";
+
+/**
+ * Verification badge next to the contract: the Sourcify mark (linking to the
+ * repository page) when verified, a gray mark when not. Nothing while loading
+ * or when Sourcify could not be reached.
+ */
+function VerifiedBadge({ address }: { address: string }) {
+  const [v, setV] = useState<Verification | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setV(null);
+    void fetchVerification(1, address).then((r) => !cancelled && setV(r));
+    return () => {
+      cancelled = true;
+    };
+  }, [address]);
+  if (!v || v.status === "unknown") return null;
+  if (v.status === "verified")
+    return (
+      <a
+        className="verifyBadge yes"
+        href={contractUrl(1, address)}
+        target="_blank"
+        rel="noreferrer"
+        data-tip={`Verified on Sourcify (${v.match === "exact_match" ? "exact match" : "match"}) · open in the repository`}
+      >
+        <img src="/sourcify.png" alt="Sourcify" />
+      </a>
+    );
+  return (
+    <span className="verifyBadge no" data-tip="Not verified on Sourcify">
+      ⊘
+    </span>
+  );
+}
 
 /**
  * Info banner when Sourcify says the target contract is a proxy: the proxy
@@ -190,9 +225,7 @@ function TxBody({ row }: { row: LiveTxDetail }) {
             {row.toAddress ? (
               <>
                 <b title={contractName(row.toAddress, row.entity)}>{clip(contractName(row.toAddress, row.entity))}</b>{" "}
-                <a className="mono muted" href={contractUrl(1, row.toAddress)} target="_blank" rel="noreferrer">
-                  {row.toAddress}
-                </a>
+                <span className="mono muted">{row.toAddress}</span> <VerifiedBadge address={row.toAddress} />
               </>
             ) : (
               "— (contract creation)"

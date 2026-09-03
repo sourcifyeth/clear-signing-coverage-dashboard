@@ -1866,3 +1866,48 @@ footer {
   left: auto;
   right: 0;
 }
+
+/* contract row: Sourcify verification badge with an instant tooltip */
+.verifyBadge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  vertical-align: -4px;
+  border-radius: 50%;
+  cursor: help;
+}
+.verifyBadge.yes {
+  cursor: pointer;
+}
+.verifyBadge.yes img {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+.verifyBadge.no {
+  color: var(--faint);
+  font-size: 15px;
+  line-height: 1;
+}
+.verifyBadge[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: max-content;
+  max-width: 260px;
+  background: var(--text);
+  color: #fff;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 400;
+  font-family: var(--sans);
+  white-space: normal;
+  pointer-events: none;
+  z-index: 5;
+}

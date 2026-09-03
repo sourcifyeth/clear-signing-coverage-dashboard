@@ -84,6 +84,36 @@ async function fromDescriptor(descriptorPath: string): Promise<AbiResult | null>
 }
 
 // ---------------------------------------------------------------------------
+// Verification status (for the modal's contract row)
+
+export type Verification = { status: "verified"; match: string } | { status: "unverified" } | { status: "unknown" };
+
+const verifyCache = new Map<string, Promise<Verification>>();
+
+/**
+ * Is the contract verified on Sourcify? 404 means no; a network failure means
+ * "unknown" (the UI then shows nothing). Cached per address, never throws.
+ */
+export function fetchVerification(chainId: number, address: string): Promise<Verification> {
+  const key = `${chainId}:${address.toLowerCase()}`;
+  const hit = verifyCache.get(key);
+  if (hit) return hit;
+  const p = (async (): Promise<Verification> => {
+    try {
+      const res = await fetch(`${SOURCIFY_SERVER}/v2/contract/${chainId}/${address}`);
+      if (res.status === 404) return { status: "unverified" };
+      if (!res.ok) return { status: "unknown" };
+      const body = (await res.json()) as { match?: string };
+      return { status: "verified", match: body.match ?? "match" };
+    } catch {
+      return { status: "unknown" };
+    }
+  })();
+  verifyCache.set(key, p);
+  return p;
+}
+
+// ---------------------------------------------------------------------------
 // Proxy detection (for the modal's info banner)
 
 export interface ProxyInfo {
