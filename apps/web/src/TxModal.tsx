@@ -81,8 +81,27 @@ function toneOf(row: LiveTxDetail): "ok" | "warn" | "bad" | "info" | "neutral" {
   return "info";
 }
 
+/** Headline and one-line explanation for the status banner. */
+function bannerText(row: LiveTxDetail): { title: string; sub: string } {
+  switch (row.bucket) {
+    case "eth_transfer":
+      return { title: "ETH transfer", sub: "Wallets show the amount and the recipient natively." };
+    case "token_native":
+      return { title: "Token transfer / approval", sub: "Wallets show it natively from the token's own metadata." };
+    case "contract_creation":
+      return { title: "Contract creation", sub: "There is nothing to clear-sign." };
+    case "covered_theory":
+      if (row.status === "failed") return { title: "Not clear-signable", sub: "A descriptor exists, but the library could not render this call." };
+      if (row.status === "partial") return { title: "Clear-signable, with warnings", sub: "The descriptor rendered it, but some fields fell back to raw values." };
+      return { title: "Clear-signable", sub: "An ERC-7730 descriptor renders this call in the wallet." };
+    default:
+      return { title: "Not clear-signable", sub: "No ERC-7730 descriptor covers this call, so the wallet shows raw hex." };
+  }
+}
+
 function TxBody({ row }: { row: LiveTxDetail }) {
   const icon = iconFor(row);
+  const banner = bannerText(row);
   const sig = row.functionSig ? canonicalSig(row.functionSig) : null;
   return (
     <>
@@ -140,8 +159,15 @@ function TxBody({ row }: { row: LiveTxDetail }) {
       </div>
 
       <div className={`statusBanner ${toneOf(row)}`} role="status">
-        <span className={`tickIcon big ${icon.cls ?? ""}`}>{icon.glyph}</span>
-        <span className="statusText">{icon.tip}</span>
+        {icon.cls === "eth" ? (
+          <span className="tickIcon eth statusGlyph">{icon.glyph}</span>
+        ) : (
+          <span className="statusGlyph">{icon.glyph}</span>
+        )}
+        <span>
+          <span className="statusTitle">{banner.title}</span>
+          <span className="statusSub">{banner.sub}</span>
+        </span>
       </div>
 
       <Result row={row} />

@@ -1601,3 +1601,25 @@ footer {
   border-color: #c7d2ee;
   color: #2b50aa;
 }
+.statusBanner .statusGlyph {
+  font-size: 24px;
+  line-height: 1;
+  flex: none;
+}
+.statusBanner .tickIcon.eth.statusGlyph {
+  width: 28px;
+  height: 28px;
+  font-size: 15px;
+}
+.statusBanner .statusTitle {
+  display: block;
+  font-size: 16px;
+  font-weight: 600;
+}
+.statusBanner .statusSub {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 400;
+  opacity: 0.85;
+}
