@@ -1655,3 +1655,14 @@ footer {
 .decodedSource {
   margin: 0 0 6px;
 }
+
+/* decoded arguments: the name reads larger than its type ("executor" > "address") */
+.argName {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-soft);
+}
+.argName .argType {
+  font-size: 11px;
+  font-weight: 400;
+}
