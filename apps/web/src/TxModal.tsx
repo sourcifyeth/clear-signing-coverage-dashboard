@@ -54,8 +54,8 @@ function ProxyBanner({ address }: { address: string }) {
             ))}
             {hiddenCount > 0 && (
               <>
-                {" "}
-                <button type="button" className="linkBtn small" onClick={() => setShowAll(true)}>
+                , …{" "}
+                <button type="button" className="chipBtn" onClick={() => setShowAll(true)}>
                   Show all ({info.implementations.length})
                 </button>
               </>
@@ -63,7 +63,7 @@ function ProxyBanner({ address }: { address: string }) {
             {showAll && info.implementations.length > MAX_SHOWN && (
               <>
                 {" "}
-                <button type="button" className="linkBtn small" onClick={() => setShowAll(false)}>
+                <button type="button" className="chipBtn" onClick={() => setShowAll(false)}>
                   Show less
                 </button>
               </>
