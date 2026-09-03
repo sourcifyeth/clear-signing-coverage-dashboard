@@ -137,8 +137,8 @@ function Body({
           <div className="modalTitle">Block {fmtInt(block.number)}</div>
           <div className="muted small">
             {when} · {fmtInt(block.txCount)} transactions ·{" "}
-            <a className="mono" href={`https://etherscan.io/block/${block.number}`} target="_blank" rel="noreferrer">
-              {block.hash.slice(0, 10)}…{block.hash.slice(-6)} ↗
+            <a href={`https://etherscan.io/block/${block.number}`} target="_blank" rel="noreferrer" title={`block hash ${block.hash}`}>
+              Etherscan ↗
             </a>
           </div>
         </div>
