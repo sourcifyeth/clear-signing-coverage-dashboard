@@ -1,7 +1,7 @@
 /**
  * Sourcify verification cache (`contracts` table): is a contract verified,
  * with which match kind, and what does Sourcify call it. Filled by the
- * `contracts:sync` worker, read by the API to split "not covered" into
+ * follower's background Sourcify sync, read by the API to split "not covered" into
  * verified (a descriptor can be written) and unverified (no ABI, nothing to
  * build on).
  *

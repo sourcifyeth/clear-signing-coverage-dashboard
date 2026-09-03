@@ -24,6 +24,9 @@
  *   POLL_MS          head poll interval, default 4000
  *   START_BLOCK      first block to process (default: current head)
  *   RETENTION_DAYS   prune live rows older than this, default 7
+ *   CONTRACTS_SYNC   "0" turns off the background Sourcify verification sync
+ *   CONTRACTS_BATCH  addresses checked per 30 s round, default 100
+ *   CONTRACTS_RATE   Sourcify requests per second, default 4
  *
  * Usage: npm run follow
  */
@@ -55,6 +58,7 @@ import { bucketFor } from "../classify.js";
 import { classifyModel, intentToString } from "../practical.js";
 import { makeRpc, rpcFromEnv, type RpcBlock, type RpcTx } from "@ccd/rpc";
 import { SignatureCache } from "./signatures.js";
+import { contractSyncEnabled, startContractSync } from "./contractSync.js";
 import { TokenCache, createExternalDataProvider } from "./externalData.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -168,6 +172,9 @@ async function main(): Promise<void> {
   const sigs = new SignatureCache(db);
   const tokens = new TokenCache(db, rpc, CHAIN_ID);
   const externalData = createExternalDataProvider({ db, rpc, chainId: CHAIN_ID, tokens });
+  // Sourcify verification runs in the background on this same connection; the
+  // block loop never waits on it.
+  const contractSync = contractSyncEnabled() ? startContractSync(db, { chainId: CHAIN_ID, log }) : null;
 
   log(`follower: rpc=${rpc.label} db=${dbPath}`);
   log(
@@ -271,6 +278,7 @@ async function main(): Promise<void> {
     }
   }
 
+  if (contractSync) await contractSync.stop();
   db.close();
   log(`follower: stopped after ${processed} blocks`);
 }

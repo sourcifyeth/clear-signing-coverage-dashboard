@@ -15,7 +15,6 @@
     "follow": "tsx packages/worker/src/follower/follow.ts",
     "signatures:backfill": "tsx packages/worker/src/follower/backfillSignatures.ts",
     "tokens:backfill": "tsx packages/worker/src/follower/backfillTokens.ts",
-    "contracts:sync": "tsx packages/worker/src/follower/syncContracts.ts",
     "api": "tsx packages/api/src/server.ts",
     "web": "npm run dev --workspace apps/web",
     "dev": "npm run api & npm run web"
