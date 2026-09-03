@@ -81,6 +81,19 @@ function selectorOf(input: string): string {
   return input.length >= 10 ? input.slice(0, 10).toLowerCase() : input.toLowerCase();
 }
 
+/**
+ * What the library asks the "wallet" for. Chain info is static, so native
+ * amounts (`format: "amount"`, e.g. WETH deposit) print as "0.05 ETH" instead
+ * of raw wei with an UNKNOWN_CHAIN warning. Token metadata (`tokenAmount`)
+ * still needs the token cache and stays unresolved for now.
+ */
+const EXTERNAL_DATA: NonNullable<Parameters<typeof format>[1]>["externalDataProvider"] = {
+  resolveChainInfo: async (chainId) =>
+    chainId === CHAIN_ID
+      ? { name: "Ethereum Mainnet", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } }
+      : null,
+};
+
 async function classifyTx(
   t: RpcTx,
   cov: CoverageLookup,
@@ -102,7 +115,7 @@ async function classifyTx(
     }
     model = await format(
       { chainId: CHAIN_ID, to, data: t.input, value, from: t.from },
-      { descriptorResolverOptions: resolverOptions },
+      { descriptorResolverOptions: resolverOptions, externalDataProvider: EXTERNAL_DATA },
     );
   } catch (e) {
     model = { warnings: [{ code: "UNEXPECTED_LIB_ERROR" as never, message: String(e) }] };
