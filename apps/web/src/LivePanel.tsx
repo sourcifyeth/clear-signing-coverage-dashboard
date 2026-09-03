@@ -245,18 +245,18 @@ export function LivePanel({
                     )}
                   </div>
                   <div className="toggles">
-                    <Toggle on disabled label={`Descriptors ${fmtPct(s.headline.theoryPctOfAll)}`} swatch="#4ade80" />
+                    <Toggle on disabled label={`Descriptors ${fmtPct(s.headline.theoryPctOfAll)}`} swatch="#2b50aa" />
                     <Toggle
                       on={state.countEth}
                       onClick={() => state.setCountEth(!state.countEth)}
                       label={`Include ETH transfers · ${fmtPct(s.allTx ? (s.native.ethTransfers / s.allTx) * 100 : 0)}`}
-                      swatch="#38bdf8"
+                      swatch="#a9bdee"
                     />
                     <Toggle
                       on={state.countToken}
                       onClick={() => state.setCountToken(!state.countToken)}
                       label={`Include token transfers · ${fmtPct(s.allTx ? (s.native.tokenTransfers / s.allTx) * 100 : 0)}`}
-                      swatch="#818cf8"
+                      swatch="#87b141"
                     />
                   </div>
                   {excluding && (

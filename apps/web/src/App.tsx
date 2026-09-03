@@ -42,6 +42,36 @@ export function App() {
   const state: ToggleState = { countEth, countToken, setCountEth, setCountToken };
 
   return (
+    <>
+      <div className="topbar">
+        <div className="topbarInner">
+          <a className="brand" href="https://sourcify.dev" target="_blank" rel="noreferrer">
+            <img src="/sourcify.png" alt="Sourcify logo" />
+            <span className="vt">sourcify.eth</span>
+          </a>
+          <nav className="topnav">
+            <a href="https://sourcify.dev" target="_blank" rel="noreferrer">
+              Sourcify ↗
+            </a>
+            <a href="https://verify.sourcify.dev" target="_blank" rel="noreferrer">
+              Verify
+            </a>
+            <a href="https://repo.sourcify.dev" target="_blank" rel="noreferrer">
+              Repo
+            </a>
+            <a href="https://4byte.sourcify.dev" target="_blank" rel="noreferrer">
+              4byte
+            </a>
+            <a className="current" href="/">
+              Clear-signing
+            </a>
+            <a href={REGISTRY_REPO} target="_blank" rel="noreferrer">
+              Registry ↗
+            </a>
+          </nav>
+        </div>
+      </div>
+
     <div className="wrap">
       <header className="head">
         <div>
@@ -95,6 +125,7 @@ export function App() {
 
       {modalHash && <TxModal hash={modalHash} onClose={() => setModalHash(null)} />}
     </div>
+    </>
   );
 }
 
@@ -137,18 +168,18 @@ function Snapshot({ report, state }: { report: Report; state: ToggleState }) {
               : "of the remaining transactions clear-signable"}
           </div>
           <div className="toggles">
-            <Toggle on disabled label={`Descriptors ${fmtPct(r.headline.theoryPctOfAll)}`} swatch="#4ade80" />
+            <Toggle on disabled label={`Descriptors ${fmtPct(r.headline.theoryPctOfAll)}`} swatch="#2b50aa" />
             <Toggle
               on={state.countEth}
               onClick={() => state.setCountEth(!state.countEth)}
               label={`Include ETH transfers · ${fmtPct((b.eth_transfer / total) * 100)}`}
-              swatch="#38bdf8"
+              swatch="#a9bdee"
             />
             <Toggle
               on={state.countToken}
               onClick={() => state.setCountToken(!state.countToken)}
               label={`Include token transfers · ${fmtPct((b.token_native / total) * 100)}`}
-              swatch="#818cf8"
+              swatch="#87b141"
             />
           </div>
           {(!state.countEth || !state.countToken) && (
@@ -207,27 +238,27 @@ function Snapshot({ report, state }: { report: Report; state: ToggleState }) {
         <div style={{ width: "100%", height: 320 }}>
           <ResponsiveContainer>
             <LineChart data={chartData} margin={{ top: 8, right: 16, bottom: 24, left: 8 }}>
-              <CartesianGrid stroke="#1e293b" />
+              <CartesianGrid stroke="#e5e7eb" />
               <XAxis
                 dataKey="n"
-                stroke="#64748b"
+                stroke="#6b7280"
                 tick={{ fontSize: 12 }}
-                label={{ value: "contracts added", position: "insideBottom", offset: -12, fill: "#64748b" }}
+                label={{ value: "contracts added", position: "insideBottom", offset: -12, fill: "#6b7280" }}
               />
               <YAxis
                 domain={[Math.floor(chartData[0].pct / 5) * 5, 100]}
-                stroke="#64748b"
+                stroke="#6b7280"
                 tick={{ fontSize: 12 }}
                 tickFormatter={(v) => `${v}%`}
               />
               <Tooltip
-                contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8 }}
+                contentStyle={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 6, fontSize: 12 }}
                 formatter={(v: number) => [`${v.toFixed(2)}%`, "coverage"]}
                 labelFormatter={(l) => `${l} contracts added`}
               />
-              <ReferenceLine y={80} stroke="#eab308" strokeDasharray="4 4" label={{ value: "80%", fill: "#eab308", position: "insideTopLeft", fontSize: 12 }} />
-              <ReferenceLine y={95} stroke="#f97316" strokeDasharray="4 4" label={{ value: "95%", fill: "#f97316", position: "insideTopLeft", fontSize: 12 }} />
-              <Line type="monotone" dataKey="pct" stroke="#4ade80" strokeWidth={2} dot={false} />
+              <ReferenceLine y={80} stroke="#d97706" strokeDasharray="4 4" label={{ value: "80%", fill: "#d97706", position: "insideTopLeft", fontSize: 12 }} />
+              <ReferenceLine y={95} stroke="#ae373f" strokeDasharray="4 4" label={{ value: "95%", fill: "#ae373f", position: "insideTopLeft", fontSize: 12 }} />
+              <Line type="monotone" dataKey="pct" stroke="#2b50aa" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>

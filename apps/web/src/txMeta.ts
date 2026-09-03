@@ -75,25 +75,27 @@ export interface TxIcon {
 }
 
 /**
- * Row icon: what a wallet user gets for this transaction.
- *   ✅ clear-signed by a descriptor   ⚠️ clear-signed with warnings
- *   ❌ raw hex (no descriptor, or the library failed)
- *   💸 token transfer / approve (wallet-native)   Ξ plain ETH transfer   📦 contract creation
+ * Row icon: a small tile with a glyph (no emoji, so it sits well on the light
+ * Sourcify surfaces). The class picks the tile color.
+ *   ✓ blue   clear-signed by a descriptor      !  amber  clear-signed with warnings
+ *   ✕ coral  raw hex (no descriptor, or the library failed)
+ *   ⇄ green  token transfer / approve (wallet-native)
+ *   Ξ light  plain ETH transfer                +  gray   contract creation
  */
 export function iconFor(t: Pick<LiveTx, "bucket" | "status">): TxIcon {
   switch (t.bucket) {
     case "eth_transfer":
       return { glyph: "Ξ", tip: "ETH transfer — wallets show this natively", cls: "eth" };
     case "token_native":
-      return { glyph: "💸", tip: "Token transfer / approve — wallets show this natively" };
+      return { glyph: "⇄", tip: "Token transfer / approve — wallets show this natively", cls: "tok" };
     case "contract_creation":
-      return { glyph: "📦", tip: "Contract creation" };
+      return { glyph: "+", tip: "Contract creation", cls: "new" };
     case "covered_theory":
-      if (t.status === "failed") return { glyph: "❌", tip: "Descriptor exists, but the library failed" };
-      if (t.status === "partial") return { glyph: "⚠️", tip: "Clear-signed, with warnings" };
-      return { glyph: "✅", tip: "Clear-signed by an ERC-7730 descriptor" };
+      if (t.status === "failed") return { glyph: "✕", tip: "Descriptor exists, but the library failed", cls: "no" };
+      if (t.status === "partial") return { glyph: "!", tip: "Clear-signed, with warnings", cls: "warn" };
+      return { glyph: "✓", tip: "Clear-signed by an ERC-7730 descriptor", cls: "ok" };
     default:
-      return { glyph: "❌", tip: "Not clear-signable — the wallet shows raw hex" };
+      return { glyph: "✕", tip: "Not clear-signable — the wallet shows raw hex", cls: "no" };
   }
 }
 

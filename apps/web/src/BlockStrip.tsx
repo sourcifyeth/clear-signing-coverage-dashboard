@@ -9,7 +9,7 @@
 
 import { useState } from "react";
 import type { BlockStat } from "./types.ts";
-import { fmtInt, fmtPct } from "./buckets.ts";
+import { COLOR, fmtInt, fmtPct } from "./buckets.ts";
 
 export interface BlockSplit {
   counted: number;
@@ -46,7 +46,7 @@ export function BlockStrip({
     <div className="strip">
       <div className="stripHead">
         <div>
-          <span className="stripNum" style={{ color: "#4ade80" }}>
+          <span className="stripNum" style={{ color: COLOR.ok }}>
             {fmtInt(lastSplit.signable)}
           </span>
           <span className="muted"> of </span>
@@ -85,8 +85,8 @@ export function BlockStrip({
           >
             <div className="mono">block {fmtInt(shown.number)}</div>
             <div>
-              <b style={{ color: "#4ade80" }}>{fmtInt(shownSplit.signable)}</b> clear-signable ·{" "}
-              <b style={{ color: "#f87171" }}>{fmtInt(shownSplit.counted - shownSplit.signable)}</b> not ·{" "}
+              <b style={{ color: COLOR.eth }}>{fmtInt(shownSplit.signable)}</b> clear-signable ·{" "}
+              <b style={{ color: COLOR.no }}>{fmtInt(shownSplit.counted - shownSplit.signable)}</b> not ·{" "}
               {fmtPct(shownSplit.pct)}
             </div>
             <div className="muted">
@@ -103,10 +103,10 @@ export function BlockStrip({
       </div>
       <div className="legend small">
         <div className="legendItem">
-          <span className="swatch" style={{ background: "#4ade80" }} /> clear-signable
+          <span className="swatch" style={{ background: COLOR.ok }} /> clear-signable
         </div>
         <div className="legendItem">
-          <span className="swatch" style={{ background: "#f87171", opacity: 0.55 }} /> not clear-signable
+          <span className="swatch" style={{ background: "#ffccd0" }} /> not clear-signable
         </div>
         <div className="legendItem muted">bar height = share of the block's {what}</div>
       </div>

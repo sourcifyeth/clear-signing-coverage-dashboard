@@ -1,21 +1,31 @@
 import type { BucketKey, Buckets, LiveStatus } from "./types.ts";
 
+// Sourcify palette: cerulean blue = covered, light coral = not covered,
+// partial-match green = wallet-native token calls, light blue = ETH sends.
 export const BUCKETS: { key: BucketKey; label: string; color: string }[] = [
-  { key: "covered_theory", label: "Covered by descriptor", color: "#4ade80" },
-  { key: "eth_transfer", label: "ETH transfer", color: "#38bdf8" },
-  { key: "token_native", label: "Token transfer / approve", color: "#818cf8" },
-  { key: "not_covered", label: "Not covered", color: "#f87171" },
-  { key: "contract_creation", label: "Contract creation", color: "#64748b" },
+  { key: "covered_theory", label: "Covered by descriptor", color: "#2b50aa" },
+  { key: "eth_transfer", label: "ETH transfer", color: "#a9bdee" },
+  { key: "token_native", label: "Token transfer / approve", color: "#87b141" },
+  { key: "not_covered", label: "Not covered", color: "#ff858d" },
+  { key: "contract_creation", label: "Contract creation", color: "#9ca3af" },
 ];
+
+export const COLOR = {
+  ok: "#2b50aa",
+  no: "#ff858d",
+  noText: "#ae373f",
+  part: "#87b141",
+  eth: "#a9bdee",
+} as const;
 
 export const BUCKET_COLOR: Record<BucketKey, string> = Object.fromEntries(
   BUCKETS.map((b) => [b.key, b.color]),
 ) as Record<BucketKey, string>;
 
 export const STATUS_COLOR: Record<LiveStatus, string> = {
-  pass: "#4ade80",
-  partial: "#eab308",
-  failed: "#f87171",
+  pass: "#2b50aa",
+  partial: "#d97706",
+  failed: "#ae373f",
 };
 
 export const fmtInt = (n: number) => n.toLocaleString("en-US");

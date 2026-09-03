@@ -68,8 +68,9 @@ export function RankingPanel({
         </div>
       </div>
       <p className="muted small">
-        Every {by === "contract" ? "contract" : "function"} called in the window, most transactions first.
-        ✅ has an ERC-7730 descriptor for the call, ❌ does not.
+        Every {by === "contract" ? "contract" : "function"} called in the window, most transactions first.{" "}
+        <span className="mark" style={{ color: "#2b50aa" }}>✓</span> has an ERC-7730 descriptor for the call,{" "}
+        <span className="mark" style={{ color: "#ae373f" }}>✕</span> does not.
         {excluding && " ETH and standard token transfers are left out, as set above."}
         {data && (
           <>
@@ -92,20 +93,28 @@ export function RankingPanel({
 
 function CoverageBadge({ row }: { row: RankedContractRow }) {
   if (row.txCount > 0 && row.coveredTx === row.txCount)
-    return <span className="badge ok">✅ covered</span>;
+    return (
+      <span className="badge ok">
+        <span className="mark">✓</span> covered
+      </span>
+    );
   if (row.coveredTx > 0)
     return (
       <span className="badge part" title={`${fmtInt(row.coveredTx)} of ${fmtInt(row.txCount)} calls hit a covered function`}>
-        ◐ {fmtPct(row.coveredPct)} covered
+        <span className="mark">◐</span> {fmtPct(row.coveredPct)} covered
       </span>
     );
   if (row.inRegistry)
     return (
       <span className="badge part" title="The registry has a descriptor for this address, but not for the functions being called">
-        📄 descriptor, functions missing
+        <span className="mark">◔</span> descriptor, functions missing
       </span>
     );
-  return <span className="badge no">❌ not covered</span>;
+  return (
+    <span className="badge no">
+      <span className="mark">✕</span> not covered
+    </span>
+  );
 }
 
 function SelectorChip({ s }: { s: RankedSelector }) {
@@ -118,8 +127,9 @@ function SelectorChip({ s }: { s: RankedSelector }) {
       rel="noreferrer"
       title={`${s.functionSig ? canonicalSig(s.functionSig) + " " : ""}${s.selector} · ${fmtInt(s.txCount)} txs`}
     >
-      {s.covered ? "✅" : "❌"} {name ?? s.selector}
-      <span className="muted"> {fmtInt(s.txCount)}</span>
+      <span className="mark">{s.covered ? "✓" : "✕"}</span>
+      {name ?? s.selector}
+      <span className="muted">{fmtInt(s.txCount)}</span>
     </a>
   );
 }
@@ -225,11 +235,17 @@ function FunctionTable({ rows }: { rows: RankedFunctionRow[] }) {
               </td>
               <td>
                 {f.covered ? (
-                  <span className="badge ok">✅ covered</span>
+                  <span className="badge ok">
+                    <span className="mark">✓</span> covered
+                  </span>
                 ) : f.bucket === "token_native" ? (
-                  <span className="badge part">💸 wallet-native</span>
+                  <span className="badge native">
+                    <span className="mark">⇄</span> wallet-native
+                  </span>
                 ) : (
-                  <span className="badge no">❌ not covered</span>
+                  <span className="badge no">
+                    <span className="mark">✕</span> not covered
+                  </span>
                 )}
               </td>
               <td className="r">{fmtInt(f.txCount)}</td>
