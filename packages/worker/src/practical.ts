@@ -51,6 +51,8 @@ export interface PracticalReport {
   /** every sampled group as a browsable, clickable feed (by tx volume) */
   feed: FeedItem[];
   warningCodeTotals: Record<string, number>;
+  /** every result row, for the database writer (omitted from the JSON output) */
+  results: PracticalResult[];
 }
 
 export interface FeedItem {
@@ -198,5 +200,6 @@ export async function runPractical(opts: {
     examples,
     feed,
     warningCodeTotals,
+    results,
   };
 }

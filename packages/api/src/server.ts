@@ -1,20 +1,24 @@
 #!/usr/bin/env tsx
 /**
- * Read-only API for the dashboard. Serves the coverage report snapshots that
- * Stage B writes to the out/ directory. No database yet — the reports are JSON
- * files on disk, newest wins.
+ * Read-only API for the dashboard. Reads the SQLite database the worker
+ * writes (see @ccd/db) and serves the latest aggregate / practical runs in the
+ * shapes the web app consumes.
  *
  * Endpoints:
- *   GET /api/health            -> { ok: true }
- *   GET /api/reports           -> [{ name, generatedAtIso, timeframe, totalTx }]
- *   GET /api/report/latest     -> full report JSON (most recent by generatedAtIso)
- *   GET /api/report/:name      -> full report JSON for a named file
- *   GET /api/practical/latest  -> latest practical-run JSON
- *   GET /api/registry-index    -> { calldataIndex, typedDataIndex } for the browser resolver
- *   GET /api/descriptor?path=  -> one descriptor JSON from the registry checkout
- *   GET /api/tx/:hash          -> { chainId, hash, to, from, input, value } via RPC
+ *   GET /api/health                 -> { ok, dbPath, runs }
+ *   GET /api/runs[?kind=aggregate]  -> [{ id, kind, generatedAtIso, window, totalTx?, ... }]
+ *   GET /api/reports                -> aggregate runs only (legacy alias of /api/runs?kind=aggregate)
+ *   GET /api/report/latest?limit=200&curve=500
+ *                                   -> latest aggregate run; ranking limited to the
+ *                                      top `limit` contracts plus a downsampled curve
+ *   GET /api/report/:id             -> same, for a run id
+ *   GET /api/practical/latest       -> latest practical run
+ *   GET /api/practical/:id          -> practical run by id
+ *   GET /api/registry-index         -> { calldataIndex, typedDataIndex } for the browser resolver
+ *   GET /api/descriptor?path=       -> one descriptor JSON from the registry checkout
+ *   GET /api/tx/:hash               -> { chainId, hash, to, from, input, value } via RPC
  *
- * Env: OUT_DIR (default <repo>/out), PORT (default 8787),
+ * Env: DB_PATH (default <repo>/out/coverage.sqlite), PORT (default 8787),
  *      REGISTRY_PATH (default sibling ../clear-signing-erc7730-registry),
  *      RPC_URL (default a public mainnet endpoint).
  */
@@ -24,80 +28,64 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
+import { openDb, defaultDbPath, listRuns, readReport, readPractical, countTable } from "@ccd/db";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
-const OUT_DIR = path.resolve(process.env.OUT_DIR ?? path.join(REPO_ROOT, "out"));
+const DB_PATH = defaultDbPath();
 const PORT = Number(process.env.PORT ?? 8787);
 const REGISTRY_PATH = path.resolve(
   process.env.REGISTRY_PATH ?? path.join(REPO_ROOT, "../clear-signing-erc7730-registry"),
 );
 const RPC_URL = process.env.RPC_URL ?? "https://ethereum-rpc.publicnode.com";
 
-interface ReportFile {
-  name: string;
-  generatedAtIso: string;
-  timeframe: { endIso: string; hours: number };
-  totalTx: number;
-}
-
-function listByPrefix(prefix: string): { file: string; json: any }[] {
-  if (!fs.existsSync(OUT_DIR)) return [];
-  return fs
-    .readdirSync(OUT_DIR)
-    .filter((f) => f.startsWith(prefix) && f.endsWith(".json"))
-    .map((f) => {
-      try {
-        const json = JSON.parse(fs.readFileSync(path.join(OUT_DIR, f), "utf8"));
-        return { file: f, json };
-      } catch {
-        return null;
-      }
-    })
-    .filter((x): x is { file: string; json: any } => x !== null)
-    .sort((a, b) =>
-      String(b.json.generatedAtIso ?? "").localeCompare(String(a.json.generatedAtIso ?? "")),
-    );
-}
-
-// Coverage reports are report*.json; practical runs are practical*.json.
-const listReports = () => listByPrefix("report");
-const listPractical = () => listByPrefix("practical");
+// One long-lived connection. WAL mode lets the worker write while we read.
+const db = openDb(DB_PATH);
 
 const app = express();
 app.use(cors());
 
-app.get("/api/health", (_req, res) => res.json({ ok: true, outDir: OUT_DIR }));
+function idParam(raw: string): number | "latest" | null {
+  if (raw === "latest") return "latest";
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+function intQuery(v: unknown, fallback: number): number {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
 
-app.get("/api/reports", (_req, res) => {
-  const meta: ReportFile[] = listReports().map(({ file, json }) => ({
-    name: file,
-    generatedAtIso: json.generatedAtIso ?? "",
-    timeframe: json.timeframe ?? { endIso: "", hours: 0 },
-    totalTx: json.report?.totalTx ?? 0,
-  }));
-  res.json(meta);
+app.get("/api/health", (_req, res) =>
+  res.json({ ok: true, dbPath: DB_PATH, runs: countTable(db, "runs") }),
+);
+
+app.get("/api/runs", (req, res) => {
+  const kind = req.query.kind === "aggregate" || req.query.kind === "practical" ? req.query.kind : undefined;
+  res.json(listRuns(db, kind, intQuery(req.query.limit, 100)));
 });
 
-app.get("/api/report/latest", (_req, res) => {
-  const all = listReports();
-  if (all.length === 0) return res.status(404).json({ error: "no reports in out/" });
-  res.json(all[0].json);
+// Legacy alias used by the first UI: aggregate runs only.
+app.get("/api/reports", (req, res) => {
+  res.json(listRuns(db, "aggregate", intQuery(req.query.limit, 100)));
 });
 
-app.get("/api/practical/latest", (_req, res) => {
-  const all = listPractical();
-  if (all.length === 0) return res.status(404).json({ error: "no practical runs in out/" });
-  res.json(all[0].json);
+app.get("/api/report/:id", (req, res) => {
+  const id = idParam(req.params.id);
+  if (id === null) return res.status(400).json({ error: "id must be a run id or 'latest'" });
+  const report = readReport(db, id, {
+    limit: intQuery(req.query.limit, 200),
+    curvePoints: intQuery(req.query.curve, 500),
+  });
+  if (!report) return res.status(404).json({ error: "no aggregate run found" });
+  res.json(report);
 });
 
-app.get("/api/report/:name", (req, res) => {
-  const name = path.basename(req.params.name); // prevent path traversal
-  const file = path.join(OUT_DIR, name);
-  if (!file.startsWith(OUT_DIR) || !fs.existsSync(file)) {
-    return res.status(404).json({ error: "not found" });
-  }
-  res.json(JSON.parse(fs.readFileSync(file, "utf8")));
+app.get("/api/practical/:id", (req, res) => {
+  const id = idParam(req.params.id);
+  if (id === null) return res.status(400).json({ error: "id must be a run id or 'latest'" });
+  const report = readPractical(db, id);
+  if (!report) return res.status(404).json({ error: "no practical run found" });
+  res.json(report);
 });
 
 // --- browser live-decode support ---
@@ -167,6 +155,6 @@ app.get("/api/tx/:hash", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(
-    `coverage API on http://localhost:${PORT}  (OUT_DIR=${OUT_DIR}, REGISTRY_PATH=${REGISTRY_PATH})`,
+    `coverage API on http://localhost:${PORT}  (DB_PATH=${DB_PATH}, REGISTRY_PATH=${REGISTRY_PATH})`,
   );
 });

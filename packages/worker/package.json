@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@ccd/coverage": "*",
+    "@ccd/db": "*",
     "@ethereum-sourcify/clear-signing": "^0.2.2",
     "@google-cloud/bigquery": "^7.9.1"
   }

@@ -5,14 +5,17 @@
  *
  * Usage:
  *   tsx src/cli.ts [--registry <path>] [--chains 1,10] [--out coverage.json] [--stats]
+ *                  [--no-db] [--db <path>]
  *
  * Defaults: --registry ../../../clear-signing-erc7730-registry (the sibling repo).
+ * The rows are also upserted into the SQLite database ($DB_PATH) unless --no-db.
  */
 
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { openDb, defaultDbPath, insertCoverage } from "@ccd/db";
 import { buildCoverageSet } from "./buildCoverage.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -76,6 +79,14 @@ function main(): void {
       `unparsable signatures:${set.stats.unparsableSignatures}\n` +
       `chains (rows each):   ${JSON.stringify(set.stats.chains)}\n`,
   );
+
+  if (!args["no-db"]) {
+    const dbPath = typeof args.db === "string" ? path.resolve(args.db) : defaultDbPath();
+    const db = openDb(dbPath);
+    const n = insertCoverage(db, set.rows, set.registryCommit);
+    db.close();
+    process.stderr.write(`db: upserted ${n} coverage rows into ${dbPath}\n`);
+  }
 
   if (typeof args.out === "string") {
     const outPath = path.resolve(args.out);

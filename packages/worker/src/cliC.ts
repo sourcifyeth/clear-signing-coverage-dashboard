@@ -6,15 +6,18 @@
  * Usage:
  *   tsx src/cliC.ts [--sample-hours 6] [--end 2025-08-15T00:00:00Z]
  *                   [--registry <path>] [--out out/practical.json]
- *                   [--dry-run] [--limit-print 25]
+ *                   [--dry-run] [--limit-print 25] [--no-db] [--db <path>]
  *
- * Env: GCP_PROJECT_ID, GOOGLE_APPLICATION_CREDENTIALS, REGISTRY_PATH.
+ * The run is written to the SQLite database ($DB_PATH) unless --no-db.
+ *
+ * Env: GCP_PROJECT_ID, GOOGLE_APPLICATION_CREDENTIALS, REGISTRY_PATH, DB_PATH.
  */
 
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { openDb, defaultDbPath, insertPracticalRun } from "@ccd/db";
 import { makeClient } from "./bq/client.js";
 import { sampleTxsForAddresses } from "./bq/samples.js";
 import { loadCoverageLookup } from "./coverage/loadCoverageSet.js";
@@ -111,20 +114,39 @@ async function main(): Promise<void> {
     if (p.warnings[0]) console.log(`        ${p.warnings[0].message}`);
   });
 
+  const generatedAtIso = new Date().toISOString();
+
+  if (!flag("no-db")) {
+    const dbPath = path.resolve(arg("db") ?? defaultDbPath());
+    const db = openDb(dbPath);
+    const runId = insertPracticalRun(db, {
+      generatedAtIso,
+      chainId: CHAIN_ID,
+      windowEndIso: endIso,
+      windowHours: sampleHours,
+      registryCommit,
+      bytesProcessed,
+      results: report.results,
+    });
+    db.close();
+    process.stderr.write(`\ndb: practical run ${runId} written to ${dbPath}\n`);
+  }
+
   const outArg = arg("out");
   if (outArg) {
     const outPath = path.resolve(outArg);
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    const { results: _omit, ...reportForJson } = report; // rows live in the DB; feed/problems cover the JSON
     fs.writeFileSync(
       outPath,
       JSON.stringify(
         {
-          generatedAtIso: new Date().toISOString(),
+          generatedAtIso,
           chainId: CHAIN_ID,
           registryCommit,
           sampleWindow: { endIso, hours: sampleHours },
           bytesProcessed,
-          report,
+          report: reportForJson,
         },
         null,
         2,

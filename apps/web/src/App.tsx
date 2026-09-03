@@ -97,6 +97,9 @@ function Dashboard({
   const signablePct = total ? (signable / total) * 100 : 0;
 
   const chartData = useMemo(() => {
+    // The API sends a downsampled cumulative curve over the full ranking, so
+    // the chart does not need every ranked contract in the payload.
+    if (r.ranking.curve && r.ranking.curve.length > 0) return r.ranking.curve;
     const baseline = r.headline.theoryPlusNativePctOfAll;
     const cap = Math.min(
       r.ranking.contracts.length,
@@ -336,8 +339,8 @@ function Dashboard({
   );
 }
 
-function numOr(n: number) {
-  return Number.isFinite(n) ? n : "—";
+function numOr(n: number | null | undefined) {
+  return typeof n === "number" && Number.isFinite(n) ? n : "—";
 }
 
 function PracticalPanel({

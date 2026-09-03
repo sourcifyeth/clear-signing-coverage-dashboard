@@ -34,21 +34,51 @@ packages/
               coverage set, and ranks the contracts needed to reach 80% / 95%.
               C runs the Sourcify library on a sample tx per covered group to
               check it renders in practice (theory-vs-practice gap).
-  api/        Read-only Express server over the out/ report snapshots.
+  db/         SQLite storage (better-sqlite3). Schema, writers for the worker,
+              readers for the API.
+  api/        Read-only Express server over the SQLite database.
 apps/
   web/        Vite + React dashboard.
 ```
 
-Persistence (Postgres, the 7-day per-tx index, scheduler) and the per-tx
-browser live-decode are not built yet — the API reads JSON snapshots from
-`out/` for now.
+The scheduler and the per-tx index feed are not built yet; each stage runs by
+hand and writes one run into the database.
+
+## Storage
+
+Everything lives in one SQLite file, `out/coverage.sqlite` (override with
+`DB_PATH`). The worker is the only writer and the API the only reader, so
+SQLite in WAL mode is enough; no database server is needed. Tables:
+
+| Table       | Written by | Holds |
+|-------------|------------|-------|
+| `coverage`  | Stage A/B  | one row per clear-signable (chain, address, selector); current registry state |
+| `runs`      | Stage B/C  | one row per worker run (`kind` = aggregate or practical), with window + registry commit |
+| `tx_groups` | Stage B    | one row per (to, selector) group per run, with its bucket and tx count |
+| `ranking`   | Stage B    | the cumulative "what to build next" walk, one row per not-covered contract |
+| `headline`  | Stage B    | bucket totals and the 80% / 95% thresholds per run |
+| `practical` | Stage C    | one row per covered group tested with the library: status, intent, warnings, sample tx hash |
+| `tx_index`  | (planned)  | per-transaction hash + labels, never contents; `pruneTxIndex()` enforces 7-day retention |
+
+We never store transaction contents. The browser fetches a transaction over
+RPC and decodes it on demand.
+
+The API serves the latest run in the same JSON shapes as before, except that
+`/api/report/latest` returns only the top `?limit=` ranked contracts (default
+200) plus a downsampled cumulative curve, instead of every ranked contract.
+That takes the payload from ~8 MB to ~60 KB.
 
 ## Run the dashboard
 
 ```bash
 npm install
 
+# 0. Already have out/*.json snapshots from an earlier run? Load them into the
+#    database instead of re-running BigQuery.
+npm run import-json
+
 # 1. Generate a report snapshot (needs BigQuery credentials, see .env.example).
+#    Writes a run into the database; --out additionally keeps a JSON copy.
 GCP_PROJECT_ID=... GOOGLE_APPLICATION_CREDENTIALS=/path/key.json \
   npm run stage-b -- --hours 24 --out out/report-24h.json
 
@@ -56,14 +86,14 @@ GCP_PROJECT_ID=... GOOGLE_APPLICATION_CREDENTIALS=/path/key.json \
 GCP_PROJECT_ID=... GOOGLE_APPLICATION_CREDENTIALS=/path/key.json \
   npm run stage-c -- --sample-hours 6 --out out/practical.json
 
-# 3. Start the API (serves out/*.json) and the web app.
+# 3. Start the API (reads the database) and the web app.
 npm run api          # http://localhost:8787
 npm run web          # http://localhost:5273  (proxies /api to the API)
 ```
 
-Stage B prints the headline coverage and the ranked backlog, and writes the full
-report to the `--out` file. A `--dry-run` flag reports the BigQuery bytes a run
-would scan without executing it.
+Stage B prints the headline coverage and the ranked backlog and writes the run
+to the database (`--no-db` skips that). A `--dry-run` flag reports the BigQuery
+bytes a run would scan without executing it. `GET /api/runs` lists the runs.
 
 ## Stage A — build the coverage set
 

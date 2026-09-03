@@ -6,14 +6,19 @@
  * Usage:
  *   tsx src/cli.ts [--hours 24] [--end 2025-08-01T00:00:00Z] [--registry <path>]
  *                  [--out out/report.json] [--dry-run] [--limit-print 20]
+ *                  [--no-db] [--db <path>]
  *
- * Env: GCP_PROJECT_ID, GOOGLE_APPLICATION_CREDENTIALS, REGISTRY_PATH.
+ * The run is written to the SQLite database ($DB_PATH) unless --no-db. The
+ * --out JSON is optional and kept for debugging.
+ *
+ * Env: GCP_PROJECT_ID, GOOGLE_APPLICATION_CREDENTIALS, REGISTRY_PATH, DB_PATH.
  */
 
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { openDb, defaultDbPath, insertCoverage, insertAggregateRun } from "@ccd/db";
 import { makeClient } from "./bq/client.js";
 import { aggregateTxGroups } from "./bq/aggregate.js";
 import { loadCoverageLookup } from "./coverage/loadCoverageSet.js";
@@ -105,6 +110,30 @@ async function main(): Promise<void> {
     );
   });
 
+  const generatedAtIso = new Date().toISOString();
+
+  // ---- write DB ----
+  if (!flag("no-db")) {
+    const dbPath = path.resolve(arg("db") ?? defaultDbPath());
+    const db = openDb(dbPath);
+    insertCoverage(db, [...cov.bySelector.values()], cov.registryCommit);
+    const runId = insertAggregateRun(db, {
+      generatedAtIso,
+      chainId: CHAIN_ID,
+      windowEndIso: endIso,
+      windowHours: hours,
+      source: agg.source,
+      registryCommit: cov.registryCommit,
+      bytesProcessed: agg.bytesProcessed,
+      groups: classified,
+      buckets: report.buckets,
+      totalTx: report.totalTx,
+      ranking: report.ranking,
+    });
+    db.close();
+    process.stderr.write(`\ndb: aggregate run ${runId} written to ${dbPath}\n`);
+  }
+
   // ---- write JSON ----
   const outArg = arg("out");
   if (outArg) {
@@ -114,7 +143,7 @@ async function main(): Promise<void> {
       outPath,
       JSON.stringify(
         {
-          generatedAtIso: new Date().toISOString(),
+          generatedAtIso,
           chainId: CHAIN_ID,
           registryCommit: cov.registryCommit,
           source: agg.source,

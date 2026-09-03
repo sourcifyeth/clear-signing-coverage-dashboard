@@ -78,9 +78,14 @@ export interface Report {
       theoryPctOfContractCalls: number;
     };
     ranking: {
+      /** top N ranked not-covered contracts (the API limits this; see ?limit=) */
       contracts: RankedContract[];
-      contractsToReach80: number;
-      contractsToReach95: number;
+      /** number of ranked contracts in the full set */
+      totalContracts?: number;
+      contractsToReach80: number | null;
+      contractsToReach95: number | null;
+      /** downsampled cumulative coverage curve; n = contracts added, n=0 is the baseline */
+      curve?: { n: number; pct: number }[];
     };
   };
 }
