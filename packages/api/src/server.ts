@@ -49,6 +49,9 @@ import {
   liveSummary,
   recentTxs,
   liveTx,
+  blockStats,
+  liveRanking,
+  registryCommit,
   type Bucket,
 } from "@ccd/db";
 
@@ -122,7 +125,29 @@ app.get("/api/practical/:id", (req, res) => {
 
 app.get("/api/live/latest", (_req, res) => {
   res.set("Cache-Control", "no-cache");
-  res.json({ latest: latestBlock(db), blocks: liveBlockCount(db) });
+  res.json({ latest: latestBlock(db), blocks: liveBlockCount(db), registryCommit: registryCommit(db) });
+});
+
+// Per-block breakdown for the newest blocks (oldest first).
+app.get("/api/live/blocks", (req, res) => {
+  res.set("Cache-Control", "no-cache");
+  res.json(blockStats(db, intQuery(req.query.limit, 60)));
+});
+
+// Contracts or functions in the window, ranked by transaction count, with coverage.
+app.get("/api/live/ranking", (req, res) => {
+  const w = String(req.query.window ?? "24h");
+  const hours = WINDOWS[w];
+  if (!hours) return res.status(400).json({ error: "window must be 1h, 24h or 7d" });
+  const by = req.query.by === "function" ? "function" : "contract";
+  res.set("Cache-Control", "no-cache");
+  res.json(
+    liveRanking(db, hours, {
+      by,
+      limit: intQuery(req.query.limit, 100),
+      ...excludeQuery(req.query.exclude),
+    }),
+  );
 });
 
 /**
@@ -184,10 +209,12 @@ setInterval(() => {
   }
   const lb = latestBlock(db);
   if (!lb || (ssePrevBlock !== null && lb.number <= ssePrevBlock)) return;
+  const newBlocks = ssePrevBlock === null ? 1 : Math.max(1, lb.number - ssePrevBlock);
   const payload = JSON.stringify({
     block: { number: lb.number, hash: lb.hash, timeIso: lb.timeIso, txCount: lb.txCount },
     txs: recentTxs(db, { limit: 300, sinceBlock: ssePrevBlock ?? lb.number - 1 }),
     summary: liveSummary(db, 24, { limit: 50 }),
+    blocks: blockStats(db, newBlocks),
   });
   ssePrevBlock = lb.number;
   for (const c of sseClients) c.write(`event: block\ndata: ${payload}\n\n`);

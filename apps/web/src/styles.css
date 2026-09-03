@@ -750,3 +750,313 @@ code {
   padding: 1px 5px;
   font-size: 12px;
 }
+
+/* ---------------------------------------------------------------------------
+   new-transactions banner (the list never shifts on its own) */
+.newBanner {
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 8px 12px;
+  background: rgba(74, 222, 128, 0.1);
+  border: 1px solid rgba(74, 222, 128, 0.35);
+  border-radius: 8px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  animation: arrive 0.5s ease-out;
+}
+.newBanner:hover {
+  background: rgba(74, 222, 128, 0.18);
+}
+
+/* ---------------------------------------------------------------------------
+   last-blocks strip */
+.strip {
+  margin: 4px 0 18px;
+}
+.stripHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+.stripNum {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.stripBars {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 72px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0b1120;
+}
+.stripCol {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 3px;
+  border-radius: 2px;
+  overflow: hidden;
+  cursor: default;
+}
+.stripRest {
+  background: rgba(248, 113, 113, 0.28);
+}
+.stripSig {
+  background: var(--accent);
+}
+.stripCol.hover .stripRest {
+  background: rgba(248, 113, 113, 0.5);
+}
+.stripCol.hover .stripSig {
+  background: #86efac;
+}
+.stripCol.last {
+  outline: 1px solid #e2e8f0;
+  outline-offset: 0;
+}
+.stripTip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 6;
+  line-height: 1.5;
+}
+.stripAxis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+/* ---------------------------------------------------------------------------
+   rankings */
+.rankHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.rankHead h3 {
+  margin: 0;
+}
+.rankTabs {
+  display: flex;
+  gap: 6px;
+}
+.tblWrap {
+  overflow-x: auto;
+  margin-top: 8px;
+}
+.rankTbl td {
+  vertical-align: middle;
+}
+.rankTbl tr.rowOk td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.rankTbl tr.rowPart td:first-child {
+  box-shadow: inset 3px 0 0 #eab308;
+}
+.badge {
+  display: inline-block;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+}
+.badge.ok {
+  color: var(--accent);
+  border-color: rgba(74, 222, 128, 0.4);
+}
+.badge.part {
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.4);
+}
+.badge.no {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.4);
+}
+.selChip {
+  display: inline-block;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 12px;
+  color: var(--text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.selChip.ok {
+  border-color: rgba(74, 222, 128, 0.35);
+}
+.selChip.no {
+  border-color: rgba(248, 113, 113, 0.3);
+  opacity: 0.75;
+}
+.selChip:hover {
+  border-color: #334155;
+  text-decoration: none;
+}
+.contractCell {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.contractName {
+  font-weight: 600;
+}
+.regLink {
+  display: block;
+  text-decoration: none;
+}
+.regLink:hover {
+  text-decoration: underline;
+}
+
+/* ---------------------------------------------------------------------------
+   archived snapshot */
+.archive {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.archive > summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
+.archiveBody {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-top: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+   transaction modal */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.7);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 48px 16px;
+  overflow-y: auto;
+  z-index: 50;
+}
+.modal {
+  position: relative;
+  width: 100%;
+  max-width: 720px;
+  background: var(--card);
+  border: 1px solid #334155;
+  border-radius: 14px;
+  padding: 22px 24px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  animation: arrive 0.25s ease-out;
+}
+.modalClose {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+.modalClose:hover {
+  color: var(--text);
+}
+.modalHead {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding-right: 28px;
+}
+.tickIcon.big {
+  width: 40px;
+  height: 40px;
+  font-size: 24px;
+  border-radius: 10px;
+  background: #0b1120;
+  border: 1px solid var(--border);
+}
+.tickIcon.big.eth {
+  font-size: 20px;
+  border-radius: 10px;
+}
+.modalTitle {
+  font-size: 17px;
+  font-weight: 600;
+}
+.modalMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.metaRow {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  word-break: break-all;
+}
+.metaRow a {
+  color: #93c5fd;
+  text-decoration: none;
+}
+.modalNote {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #cbd5e1;
+}
+.modalNote.warn {
+  border-left: 3px solid #f87171;
+  padding-left: 12px;
+}
+.modal .decode {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
+}
+.meta a {
+  color: #93c5fd;
+  text-decoration: none;
+}
+.meta a:hover {
+  text-decoration: underline;
+}
+.rankTbl .contractCell {
+  white-space: nowrap;
+}
+.rankTbl td:nth-child(2) {
+  min-width: 150px;
+}

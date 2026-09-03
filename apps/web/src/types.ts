@@ -129,10 +129,74 @@ export interface LiveTxDetail extends LiveTx {
   display: unknown | null;
 }
 
+/** /api/live/blocks — one block's bucket breakdown. */
+export interface BlockStat {
+  number: number;
+  timeIso: string;
+  total: number;
+  eth: number;
+  /** standard token transfer/approval calls, covered or not */
+  tokenStd: number;
+  /** covered calls that are not standard token calls */
+  coveredOther: number;
+  notCovered: number;
+  creation: number;
+}
+
 export interface LiveBlockEvent {
   block: LatestBlock;
   txs: LiveTx[];
   summary: LiveSummary;
+  /** the block(s) this event announces */
+  blocks: BlockStat[];
+}
+
+export interface LiveLatest {
+  latest: LatestBlock | null;
+  blocks: number;
+  registryCommit: string | null;
+}
+
+// --- window rankings ---
+
+export interface RankedSelector {
+  selector: string;
+  functionSig: string | null;
+  txCount: number;
+  covered: boolean;
+}
+
+export interface RankedContractRow {
+  toAddress: string;
+  entity: string | null;
+  inRegistry: boolean;
+  txCount: number;
+  sharePct: number;
+  cumulativePct: number;
+  coveredTx: number;
+  coveredPct: number;
+  distinctSelectors: number;
+  topSelectors: RankedSelector[];
+}
+
+export interface RankedFunctionRow {
+  toAddress: string;
+  entity: string | null;
+  selector: string;
+  functionSig: string | null;
+  bucket: BucketKey;
+  covered: boolean;
+  txCount: number;
+  sharePct: number;
+  cumulativePct: number;
+}
+
+export interface LiveRanking {
+  window: { hours: number; fromIso: string; toIso: string };
+  by: "contract" | "function";
+  totalTx: number;
+  contracts?: RankedContractRow[];
+  functions?: RankedFunctionRow[];
 }
 
 export interface Report {

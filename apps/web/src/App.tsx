@@ -9,40 +9,37 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from "recharts";
-import type { Report, PracticalReport } from "./types.ts";
+import type { LatestBlock, LiveLatest, Report } from "./types.ts";
 import { labelFor } from "./labels.ts";
-import { TxInspector } from "./TxInspector.tsx";
 import { LivePanel, type ToggleState } from "./LivePanel.tsx";
+import { TxModal } from "./TxModal.tsx";
 import { BucketBar, Toggle, Stat, numOr } from "./BucketBar.tsx";
 import { fmtInt, fmtPct, short, signablePct } from "./buckets.ts";
+import { REGISTRY_REPO } from "./txMeta.ts";
 
 export function App() {
   const [report, setReport] = useState<Report | null | undefined>(undefined);
-  const [practical, setPractical] = useState<PracticalReport | null>(null);
+  const [meta, setMeta] = useState<LiveLatest | null>(null);
+  const [latest, setLatest] = useState<LatestBlock | null>(null);
   // Wallet-native transfers are excluded by default: the question the dashboard
   // answers is about the calls that need a descriptor.
   const [countEth, setCountEth] = useState(false);
   const [countToken, setCountToken] = useState(false);
-  const [seedHash, setSeedHash] = useState<string | undefined>(undefined);
+  const [modalHash, setModalHash] = useState<string | null>(null);
 
   useEffect(() => {
-    // Both snapshots are optional: the live section stands on its own.
+    fetch("/api/live/latest")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setMeta)
+      .catch(() => setMeta(null));
+    // The archived BigQuery snapshot is optional: the live section stands on its own.
     fetch("/api/report/latest")
       .then((r) => (r.ok ? r.json() : null))
       .then(setReport)
       .catch(() => setReport(null));
-    fetch("/api/practical/latest")
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setPractical)
-      .catch(() => setPractical(null));
   }, []);
 
   const state: ToggleState = { countEth, countToken, setCountEth, setCountToken };
-
-  function inspect(hash: string) {
-    setSeedHash(hash);
-    document.getElementById("inspector")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
 
   return (
     <div className="wrap">
@@ -54,51 +51,49 @@ export function App() {
             descriptors, and which contracts to add next.
           </p>
         </div>
-        {report && (
-          <div className="meta">
-            <div>
-              <span className="muted">Snapshot</span> {report.timeframe.hours}h ending{" "}
-              {report.timeframe.endIso.replace("T", " ").replace(".000Z", "Z")}
-            </div>
-            <div>
-              <span className="muted">Registry</span>{" "}
-              {report.registryCommit ? report.registryCommit.slice(0, 8) : "—"}
-            </div>
-            <div>
-              <span className="muted">Generated</span>{" "}
-              {report.generatedAtIso.replace("T", " ").slice(0, 19)}
-            </div>
+        <div className="meta">
+          <div>
+            <span className="muted">Registry</span>{" "}
+            {meta?.registryCommit ? (
+              <a className="mono" href={`${REGISTRY_REPO}/commit/${meta.registryCommit}`} target="_blank" rel="noreferrer">
+                {meta.registryCommit.slice(0, 8)}
+              </a>
+            ) : (
+              "—"
+            )}
           </div>
-        )}
+          <div>
+            <span className="muted">Indexed</span>{" "}
+            {meta ? `${fmtInt(meta.blocks)} blocks · 7-day retention` : "—"}
+          </div>
+          <div>
+            <span className="muted">Head</span>{" "}
+            {latest ? (
+              <a className="mono" href={`https://etherscan.io/block/${latest.number}`} target="_blank" rel="noreferrer">
+                {fmtInt(latest.number)}
+              </a>
+            ) : (
+              "—"
+            )}
+          </div>
+        </div>
       </header>
 
-      {/* Live: block follower */}
-      <LivePanel state={state} onInspect={inspect} />
+      {/* Live: block follower, rankings */}
+      <LivePanel state={state} onInspect={setModalHash} onLatest={setLatest} />
 
-      {/* Live decode (stored result + run now) */}
-      <TxInspector
-        examples={practical?.report.examples ?? []}
-        feed={practical?.report.feed ?? []}
-        seed={seedHash}
-      />
-
-      {/* Theory vs practice (BigQuery sample) */}
-      {practical && <PracticalPanel practical={practical} onInspect={inspect} />}
-
-      {/* 24h BigQuery snapshot */}
-      {report === undefined ? (
-        <div className="muted small">Loading snapshot…</div>
-      ) : report === null ? (
-        <section className="card">
-          <h3>24h BigQuery snapshot</h3>
-          <p className="muted small">
-            No snapshot yet. Generate one with <code>npm run stage-b -- --hours 24</code> (needs
-            BigQuery credentials), or <code>npm run import-json</code> to load an existing JSON.
-          </p>
-        </section>
-      ) : (
-        <Snapshot report={report} state={state} />
+      {/* Archived BigQuery snapshot, kept for reference */}
+      {report && (
+        <details className="archive">
+          <summary className="muted small">
+            Archived BigQuery snapshot · {report.timeframe.hours}h ending{" "}
+            {report.timeframe.endIso.replace("T", " ").replace(".000Z", "Z")} · {fmtInt(report.report.totalTx)} transactions
+          </summary>
+          <Snapshot report={report} state={state} />
+        </details>
       )}
+
+      {modalHash && <TxModal hash={modalHash} onClose={() => setModalHash(null)} />}
     </div>
   );
 }
@@ -107,7 +102,6 @@ function Snapshot({ report, state }: { report: Report; state: ToggleState }) {
   const r = report.report;
   const b = r.buckets;
   const total = r.totalTx;
-  const tf = report.timeframe;
 
   const chartData = useMemo(() => {
     // The API sends a downsampled cumulative curve over the full ranking, so
@@ -126,14 +120,12 @@ function Snapshot({ report, state }: { report: Report; state: ToggleState }) {
   }, [r]);
 
   return (
-    <>
-      <h2 className="sectionTitle">
-        24h BigQuery snapshot
-        <span className="muted small">
-          {" "}
-          · {tf.hours}h ending {tf.endIso.replace("T", " ").replace(".000Z", "Z")} · {fmtInt(total)} transactions
-        </span>
-      </h2>
+    <div className="archiveBody">
+      <p className="muted small">
+        A one-off BigQuery aggregate, generated {report.generatedAtIso.replace("T", " ").slice(0, 19)} UTC
+        {report.registryCommit ? ` against registry ${report.registryCommit.slice(0, 8)}` : ""}. The live
+        section above supersedes it; this stays as a reference point.
+      </p>
 
       {/* Hero + toggles */}
       <section className="grid2">
@@ -172,10 +164,6 @@ function Snapshot({ report, state }: { report: Report; state: ToggleState }) {
               that already have a descriptor (for example Tether) stay counted.
             </div>
           )}
-          <p className="muted small">
-            A toggle that is off removes that kind of wallet-native transaction from
-            the question entirely, numerator and denominator alike.
-          </p>
         </div>
 
         <div className="card">
@@ -300,102 +288,6 @@ function Snapshot({ report, state }: { report: Report; state: ToggleState }) {
       <footer className="muted small">
         Source: {report.source} · scanned {(report.bytesProcessed / 1e9).toFixed(2)} GB
       </footer>
-    </>
-  );
-}
-
-function PracticalPanel({
-  practical,
-  onInspect,
-}: {
-  practical: PracticalReport;
-  onInspect: (hash: string) => void;
-}) {
-  const p = practical.report;
-  const c = p.counts;
-  const w = practical.sampleWindow;
-  const statusColor: Record<string, string> = {
-    pass: "#4ade80",
-    partial: "#eab308",
-    failed: "#f87171",
-  };
-  return (
-    <section className="card">
-      <h3>Theory vs practice (BigQuery sample)</h3>
-      <p className="muted small">
-        Runs the Sourcify clear-signing library on a sample transaction per covered contract
-        function, to check it actually renders — not just that a descriptor exists. Sampled
-        over {w.hours}h ending {w.endIso.replace("T", " ").replace(".000Z", "Z")}.
-      </p>
-      <div className="denoms">
-        <Stat label="Renders in practice" value={fmtPct(p.txWeighted.practicePct)} />
-        <div className="statBox">
-          <div className="statVal">
-            <span style={{ color: statusColor.pass }}>{c.pass}</span> ·{" "}
-            <span style={{ color: statusColor.partial }}>{c.partial}</span> ·{" "}
-            <span style={{ color: statusColor.failed }}>{c.failed}</span>
-          </div>
-          <div className="statLbl muted">pass · partial · failed groups</div>
-        </div>
-        <Stat label="Covered groups sampled" value={fmtInt(p.sampledGroups)} />
-      </div>
-
-      {p.problems.length === 0 ? (
-        <p className="small" style={{ color: statusColor.pass, marginTop: 14 }}>
-          ✓ Every sampled covered function rendered cleanly — no theory-vs-practice gaps.
-        </p>
-      ) : (
-        <table className="tbl" style={{ marginTop: 12 }}>
-          <thead>
-            <tr>
-              <th>Status</th>
-              <th>Contract</th>
-              <th>Function</th>
-              <th className="r">Txs</th>
-              <th>Warning</th>
-            </tr>
-          </thead>
-          <tbody>
-            {p.problems.slice(0, 25).map((pr) => (
-              <tr key={`${pr.toAddress}-${pr.selector}`}>
-                <td>
-                  <span className="tag" style={{ color: statusColor[pr.status] }}>
-                    {pr.status}
-                  </span>
-                </td>
-                <td>
-                  {pr.entity && <span className="tag">{pr.entity}</span>}
-                  <a
-                    className="mono"
-                    href={`https://etherscan.io/address/${pr.toAddress}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {short(pr.toAddress)}
-                  </a>
-                </td>
-                <td className="mono small">{pr.functionSig ?? pr.selector}</td>
-                <td className="r">{fmtInt(pr.txCount)}</td>
-                <td className="small">
-                  {pr.warnings[0] ? (
-                    <>
-                      <span className="mono">{pr.warnings[0].code}</span>
-                      <div className="muted">{pr.warnings[0].message}</div>
-                    </>
-                  ) : (
-                    "—"
-                  )}
-                  {pr.sampleTxHash && (
-                    <button className="chip" style={{ marginTop: 6 }} onClick={() => onInspect(pr.sampleTxHash)}>
-                      decode sample ↑
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </section>
+    </div>
   );
 }

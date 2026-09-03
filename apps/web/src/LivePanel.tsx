@@ -1,19 +1,27 @@
 /**
- * Live section: the block follower's rolling-window stats and a ticker of the
- * newest transactions, updated over Server-Sent Events as blocks land.
+ * Live section: the block follower's rolling-window stats, the last-blocks
+ * strip, a ticker of the newest transactions, and the window rankings —
+ * updated over Server-Sent Events as blocks land.
+ *
+ * New transactions do not enter the ticker on their own: they wait in a
+ * buffer and a banner offers to show them, so the list never shifts under the
+ * reader. The block line, the strip and the stats do update live.
  */
 
 import { useEffect, useRef, useState } from "react";
-import type { LatestBlock, LiveBlockEvent, LiveSummary, LiveTx } from "./types.ts";
-import { STANDARD_TOKEN_SELECTORS, STATUS_COLOR, excludeParam, fmtInt, fmtPct, short, signablePct } from "./buckets.ts";
+import type { BlockStat, LatestBlock, LiveBlockEvent, LiveSummary, LiveTx } from "./types.ts";
+import { STANDARD_TOKEN_SELECTORS, excludeParam, fmtInt, fmtPct, signablePct } from "./buckets.ts";
 import { BucketBar, Toggle, Stat, numOr } from "./BucketBar.tsx";
-import { labelFor } from "./labels.ts";
+import { BlockStrip } from "./BlockStrip.tsx";
+import { RankingPanel } from "./RankingPanel.tsx";
+import { fnName, iconFor, who } from "./txMeta.ts";
 
 type Win = "1h" | "24h" | "7d";
 const WINDOWS: Win[] = ["1h", "24h", "7d"];
 const TICKER_MAX = 100;
 /** raw rows kept; the visible list is this minus whatever the toggles hide */
 const TICKER_RAW_MAX = 400;
+const STRIP_BLOCKS = 60;
 /** min ms between summary refetches when the SSE summary does not apply (other window, or an exclusion is on) */
 const REFETCH_MIN_MS = 10_000;
 
@@ -38,17 +46,34 @@ function ago(iso: string, now: number): string {
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ago`;
 }
 
-function mergeTxs(incoming: LiveTx[], prev: LiveTx[]): LiveTx[] {
+function mergeTxs(incoming: LiveTx[], prev: LiveTx[], cap = TICKER_RAW_MAX): LiveTx[] {
   const seen = new Set(incoming.map((t) => t.hash));
-  return incoming.concat(prev.filter((t) => !seen.has(t.hash))).slice(0, TICKER_RAW_MAX);
+  return incoming.concat(prev.filter((t) => !seen.has(t.hash))).slice(0, cap);
 }
 
-export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect: (hash: string) => void }) {
+function mergeBlocks(prev: BlockStat[], incoming: BlockStat[]): BlockStat[] {
+  const byNum = new Map(prev.map((b) => [b.number, b]));
+  for (const b of incoming) byNum.set(b.number, b);
+  return [...byNum.values()].sort((a, b) => a.number - b.number).slice(-STRIP_BLOCKS);
+}
+
+export function LivePanel({
+  state,
+  onInspect,
+  onLatest,
+}: {
+  state: ToggleState;
+  onInspect: (hash: string) => void;
+  onLatest?: (latest: LatestBlock | null) => void;
+}) {
   const [latest, setLatest] = useState<LatestBlock | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [win, setWin] = useState<Win>("24h");
   const [summary, setSummary] = useState<LiveSummary | null>(null);
   const [txs, setTxs] = useState<LiveTx[]>([]);
+  /** rows that arrived over the stream and are not shown yet */
+  const [pending, setPending] = useState<LiveTx[]>([]);
+  const [blocks, setBlocks] = useState<BlockStat[]>([]);
   const [connected, setConnected] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [activeHash, setActiveHash] = useState<string | null>(null);
@@ -57,8 +82,8 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
   /** latest toggle state, readable from the SSE handler */
   const togglesRef = useRef({ countEth: state.countEth, countToken: state.countToken });
   togglesRef.current = { countEth: state.countEth, countToken: state.countToken };
-  /** hashes present at first load; rows not in here arrived live and get the entry animation */
-  const initialRef = useRef<Set<string> | null>(null);
+  /** hashes present when the list was last (re)loaded; rows not in here get the entry animation */
+  const shownRef = useRef<Set<string> | null>(null);
 
   // 1s clock for the "Ns ago" label.
   useEffect(() => {
@@ -75,7 +100,11 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
   }
   async function fetchRecent() {
     const r = await fetch(`/api/live/recent?limit=${TICKER_MAX}${exclude()}`);
-    if (r.ok) setTxs((await r.json()) as LiveTx[]);
+    if (!r.ok) return;
+    const rows = (await r.json()) as LiveTx[];
+    shownRef.current = new Set(rows.map((t) => t.hash));
+    setTxs(rows);
+    setPending([]);
   }
 
   // Initial load.
@@ -84,19 +113,22 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
       try {
         const l = await fetch("/api/live/latest").then((r) => r.json());
         setLatest(l.latest ?? null);
+        onLatest?.(l.latest ?? null);
         if (l.latest) {
-          const [s, recent] = await Promise.all([
+          const [s, recent, bs] = await Promise.all([
             fetch(`/api/live/summary?window=${winRef.current}&limit=50${exclude()}`).then((r) => r.json()),
             fetch(`/api/live/recent?limit=${TICKER_MAX}${exclude()}`).then((r) => r.json()),
+            fetch(`/api/live/blocks?limit=${STRIP_BLOCKS}`).then((r) => r.json()),
           ]);
           setSummary(s);
           setTxs(recent);
-          initialRef.current = new Set((recent as LiveTx[]).map((t) => t.hash));
+          setBlocks(bs);
+          shownRef.current = new Set((recent as LiveTx[]).map((t) => t.hash));
         }
       } catch {
         /* API down: the empty state below explains */
       } finally {
-        initialRef.current ??= new Set();
+        shownRef.current ??= new Set();
         setLoaded(true);
       }
     })();
@@ -121,6 +153,7 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
 
   // SSE stream. EventSource reconnects on its own. The event carries the plain
   // 24h summary; with an exclusion on, or another window, we refetch instead.
+  // New rows go to the pending buffer, not straight into the list.
   useEffect(() => {
     const es = new EventSource("/api/live/stream");
     es.onopen = () => setConnected(true);
@@ -128,7 +161,9 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
     es.addEventListener("block", (ev) => {
       const e = JSON.parse((ev as MessageEvent).data) as LiveBlockEvent;
       setLatest(e.block);
-      setTxs((prev) => mergeTxs(e.txs, prev));
+      onLatest?.(e.block);
+      setPending((prev) => mergeTxs(e.txs, prev));
+      if (e.blocks?.length) setBlocks((prev) => mergeBlocks(prev, e.blocks));
       const plain = togglesRef.current.countEth && togglesRef.current.countToken;
       if (winRef.current === "24h" && plain) setSummary(e.summary);
       else if (Date.now() - lastFetchRef.current > REFETCH_MIN_MS) void fetchSummary(winRef.current);
@@ -137,227 +172,170 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function showPending() {
+    setTxs((prev) => mergeTxs(pending, prev));
+    setPending([]);
+  }
+
   const s = summary;
   const total = s?.totalTx ?? 0;
   const excluding = !state.countEth || !state.countToken;
   const visibleTxs = txs.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken)).slice(0, TICKER_MAX);
+  const pendingVisible = pending.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken)).length;
 
   return (
-    <section className="card live">
-      <div className="liveHead">
-        <h3>
-          <span className={`liveDot ${connected ? "on" : ""}`} /> Live · Ethereum mainnet
-        </h3>
-        {latest && (
-          <div className="liveBlock mono small">
-            block{" "}
-            <a href={`https://etherscan.io/block/${latest.number}`} target="_blank" rel="noreferrer">
-              {fmtInt(latest.number)}
-            </a>{" "}
-            · {ago(latest.timeIso, now)} · {latest.txCount} txs
+    <>
+      <section className="card live">
+        <div className="liveHead">
+          <h3>
+            <span className={`liveDot ${connected ? "on" : ""}`} /> Live · Ethereum mainnet
+          </h3>
+          {latest && (
+            <div className="liveBlock mono small">
+              block{" "}
+              <a href={`https://etherscan.io/block/${latest.number}`} target="_blank" rel="noreferrer">
+                {fmtInt(latest.number)}
+              </a>{" "}
+              · {ago(latest.timeIso, now)} · {latest.txCount} txs
+            </div>
+          )}
+          <div className="winSel">
+            {WINDOWS.map((w) => (
+              <button key={w} className={`chip ${win === w ? "on" : ""}`} onClick={() => setWin(w)}>
+                {w}
+              </button>
+            ))}
           </div>
-        )}
-        <div className="winSel">
-          {WINDOWS.map((w) => (
-            <button key={w} className={`chip ${win === w ? "on" : ""}`} onClick={() => setWin(w)}>
-              {w}
-            </button>
-          ))}
         </div>
-      </div>
 
-      {!loaded ? (
-        <div className="muted small">Connecting…</div>
-      ) : !latest ? (
-        <div className="liveEmpty">
-          <div>No blocks yet — the follower is not running.</div>
-          <div className="muted small">
-            Start it with <code>npm run follow</code>. Stats fill up from the moment it starts; the
-            24h / 7d windows are complete after that much time.
+        {!loaded ? (
+          <div className="muted small">Connecting…</div>
+        ) : !latest ? (
+          <div className="liveEmpty">
+            <div>No blocks yet — the follower is not running.</div>
+            <div className="muted small">
+              Start it with <code>npm run follow</code>. Stats fill up from the moment it starts; the
+              24h / 7d windows are complete after that much time.
+            </div>
           </div>
-        </div>
-      ) : (
-        s && (
-          <>
-            <div className="grid2">
-              <div className="hero">
-                <div className="heroNum">{fmtPct(signablePct(s.buckets, total, state.countEth, state.countToken))}</div>
-                <div className="heroLabel">
-                  of {excluding ? "contract calls" : "transactions"} in the last {win} clear-signable
-                  {s.blocks < (s.window.hours * 300) && (
-                    <span className="muted"> · {fmtInt(s.blocks)} blocks so far</span>
+        ) : (
+          s && (
+            <>
+              <div className="grid2">
+                <div className="hero">
+                  <div className="heroNum">{fmtPct(signablePct(s.buckets, total, state.countEth, state.countToken))}</div>
+                  <div className="heroLabel">
+                    of {excluding ? "contract calls" : "transactions"} in the last {win} clear-signable
+                    {s.blocks < s.window.hours * 300 && (
+                      <span className="muted"> · {fmtInt(s.blocks)} blocks so far</span>
+                    )}
+                  </div>
+                  <div className="toggles">
+                    <Toggle on disabled label={`Descriptors ${fmtPct(s.headline.theoryPctOfAll)}`} swatch="#4ade80" />
+                    <Toggle
+                      on={state.countEth}
+                      onClick={() => state.setCountEth(!state.countEth)}
+                      label={`Include ETH transfers · ${fmtPct(s.allTx ? (s.native.ethTransfers / s.allTx) * 100 : 0)}`}
+                      swatch="#38bdf8"
+                    />
+                    <Toggle
+                      on={state.countToken}
+                      onClick={() => state.setCountToken(!state.countToken)}
+                      label={`Include token transfers · ${fmtPct(s.allTx ? (s.native.tokenTransfers / s.allTx) * 100 : 0)}`}
+                      swatch="#818cf8"
+                    />
+                  </div>
+                  {excluding && (
+                    <div className="disclaimer small">
+                      Excluding{" "}
+                      <b>
+                        {[
+                          !state.countEth && `${fmtInt(s.excluded.ethTransfers)} ETH transfers`,
+                          !state.countToken && `${fmtInt(s.excluded.tokenTransfers)} token transfers / approvals`,
+                        ]
+                          .filter(Boolean)
+                          .join(" and ")}
+                      </b>
+                      , {fmtPct(s.allTx ? ((s.excluded.ethTransfers + s.excluded.tokenTransfers) / s.allTx) * 100 : 0)} of
+                      the {fmtInt(s.allTx)} transactions in this window. The percentage, the rankings, and the list below
+                      cover only the other <b>{fmtInt(s.totalTx)}</b> transactions: the calls that need a descriptor.
+                      {!state.countToken && " Token transfers to tokens that have a descriptor (for example Tether) are excluded too."}
+                    </div>
                   )}
                 </div>
-                <div className="toggles">
-                  <Toggle on disabled label={`Descriptors ${fmtPct(s.headline.theoryPctOfAll)}`} swatch="#4ade80" />
-                  <Toggle
-                    on={state.countEth}
-                    onClick={() => state.setCountEth(!state.countEth)}
-                    label={`Include ETH transfers · ${fmtPct(s.allTx ? (s.native.ethTransfers / s.allTx) * 100 : 0)}`}
-                    swatch="#38bdf8"
-                  />
-                  <Toggle
-                    on={state.countToken}
-                    onClick={() => state.setCountToken(!state.countToken)}
-                    label={`Include token transfers · ${fmtPct(s.allTx ? (s.native.tokenTransfers / s.allTx) * 100 : 0)}`}
-                    swatch="#818cf8"
-                  />
+
+                <div>
+                  <div className="reachRow">
+                    <div className="reach">
+                      <div className="reachNum">{numOr(s.ranking.contractsToReach80)}</div>
+                      <div className="reachLabel">contracts to reach 80%</div>
+                    </div>
+                    <div className="reach">
+                      <div className="reachNum">{numOr(s.ranking.contractsToReach95)}</div>
+                      <div className="reachLabel">contracts to reach 95%</div>
+                    </div>
+                  </div>
+                  <div className="denoms">
+                    <Stat
+                      label={excluding ? `Contract calls counted, last ${win}` : `Transactions, last ${win}`}
+                      value={fmtInt(total)}
+                    />
+                    <Stat label="Blocks" value={fmtInt(s.blocks)} />
+                    <Stat label="Uncovered contracts" value={fmtInt(s.ranking.totalContracts)} />
+                  </div>
                 </div>
+              </div>
+
+              <div className="liveBar">
+                <BucketBar buckets={s.buckets} total={total} />
+              </div>
+
+              <BlockStrip blocks={blocks} countEth={state.countEth} countToken={state.countToken} />
+
+              <div className="tickerHead muted small">
+                Newest transactions — click one for details
                 {excluding && (
-                  <div className="disclaimer small">
-                    Excluding{" "}
-                    <b>
-                      {[
-                        !state.countEth && `${fmtInt(s.excluded.ethTransfers)} ETH transfers`,
-                        !state.countToken && `${fmtInt(s.excluded.tokenTransfers)} token transfers / approvals`,
-                      ]
-                        .filter(Boolean)
-                        .join(" and ")}
-                    </b>
-                    , {fmtPct(s.allTx ? ((s.excluded.ethTransfers + s.excluded.tokenTransfers) / s.allTx) * 100 : 0)} of
-                    the {fmtInt(s.allTx)} transactions in this window. The percentage, the ranking, and the list below
-                    cover only the other <b>{fmtInt(s.totalTx)}</b> transactions: the calls that need a descriptor.
-                    {!state.countToken && " Token transfers to tokens that have a descriptor (for example Tether) are excluded too."}
-                  </div>
+                  <span>
+                    {" "}
+                    · {[!state.countEth && "ETH transfers", !state.countToken && "token transfers"].filter(Boolean).join(" and ")}{" "}
+                    hidden
+                  </span>
                 )}
-                <div className="small practiceLine">
-                  Library renders{" "}
-                  <b style={{ color: STATUS_COLOR.pass }}>{fmtPct(s.practice.practicePct)}</b> of covered txs ·{" "}
-                  <span style={{ color: STATUS_COLOR.pass }}>{fmtInt(s.practice.passTx)}</span> pass ·{" "}
-                  <span style={{ color: STATUS_COLOR.partial }}>{fmtInt(s.practice.partialTx)}</span> partial ·{" "}
-                  <span style={{ color: STATUS_COLOR.failed }}>{fmtInt(s.practice.failedTx)}</span> failed
-                </div>
               </div>
-
-              <div>
-                <div className="reachRow">
-                  <div className="reach">
-                    <div className="reachNum">{numOr(s.ranking.contractsToReach80)}</div>
-                    <div className="reachLabel">contracts to reach 80%</div>
-                  </div>
-                  <div className="reach">
-                    <div className="reachNum">{numOr(s.ranking.contractsToReach95)}</div>
-                    <div className="reachLabel">contracts to reach 95%</div>
-                  </div>
-                </div>
-                <div className="denoms">
-                  <Stat
-                    label={excluding ? `Contract calls counted, last ${win}` : `Transactions, last ${win}`}
-                    value={fmtInt(total)}
-                  />
-                  <Stat label="Blocks" value={fmtInt(s.blocks)} />
-                  <Stat label="Uncovered contracts" value={fmtInt(s.ranking.totalContracts)} />
-                </div>
-              </div>
-            </div>
-
-            <div className="liveBar">
-              <BucketBar buckets={s.buckets} total={total} />
-            </div>
-
-            <div className="tickerHead muted small">
-              Newest transactions — click one to see it clear-signed
-              {excluding && (
-                <span>
-                  {" "}
-                  · {[!state.countEth && "ETH transfers", !state.countToken && "token transfers"].filter(Boolean).join(" and ")}{" "}
-                  hidden
-                </span>
+              {pendingVisible > 0 && (
+                <button className="newBanner" onClick={showPending}>
+                  {fmtInt(pendingVisible)} new transaction{pendingVisible === 1 ? "" : "s"} arrived · show
+                </button>
               )}
-            </div>
-            <div className="ticker">
-              {visibleTxs.map((t) => (
-                <TickerRow
-                  key={t.hash}
-                  tx={t}
-                  fresh={initialRef.current !== null && !initialRef.current.has(t.hash)}
-                  active={activeHash === t.hash}
-                  onClick={() => {
-                    setActiveHash(t.hash);
-                    onInspect(t.hash);
-                  }}
-                />
-              ))}
-            </div>
-          </>
-        )
+              <div className="ticker">
+                {visibleTxs.map((t) => (
+                  <TickerRow
+                    key={t.hash}
+                    tx={t}
+                    fresh={shownRef.current !== null && !shownRef.current.has(t.hash)}
+                    active={activeHash === t.hash}
+                    onClick={() => {
+                      setActiveHash(t.hash);
+                      onInspect(t.hash);
+                    }}
+                  />
+                ))}
+              </div>
+            </>
+          )
+        )}
+      </section>
+
+      {latest && (
+        <RankingPanel
+          win={win}
+          exclude={excludeParam(state.countEth, state.countToken)}
+          excluding={excluding}
+          refreshKey={latest.number}
+        />
       )}
-    </section>
+    </>
   );
-}
-
-function who(t: LiveTx): string {
-  if (t.bucket === "contract_creation") return "contract creation";
-  if (t.entity) return t.entity;
-  if (!t.toAddress) return "?";
-  return labelFor(t.toAddress) ?? short(t.toAddress);
-}
-
-/**
- * Canonical form of a signature: parameter names dropped, e.g.
- * "transfer(address _to, uint256 _value)" -> "transfer(address,uint256)".
- * Tuples keep their nesting. Already-canonical input passes through unchanged.
- */
-export function canonicalSig(sig: string): string {
-  const open = sig.indexOf("(");
-  if (open < 0) return sig;
-  const name = sig.slice(0, open).trim();
-  const body = sig.slice(open + 1, sig.lastIndexOf(")"));
-  const parts: string[] = [];
-  let depth = 0;
-  let cur = "";
-  for (const ch of body) {
-    if (ch === "(") depth++;
-    if (ch === ")") depth--;
-    if (ch === "," && depth === 0) {
-      parts.push(cur);
-      cur = "";
-    } else cur += ch;
-  }
-  if (cur.trim()) parts.push(cur);
-  const types = parts.map((p) => {
-    const s = p.trim();
-    if (s.startsWith("(")) {
-      // tuple: "(address a, uint256 b)[] name" -> "(address,uint256)[]"
-      const end = s.lastIndexOf(")");
-      // keep only array suffixes such as "[]" or "[2]", drop the parameter name
-      const after = s.slice(end + 1).trim().match(/^(\[[^\]]*\])+/)?.[0] ?? "";
-      return canonicalSig(`_${s.slice(0, end + 1)}`).slice(1) + after;
-    }
-    return s.split(/\s+/)[0];
-  });
-  return `${name}(${types.join(",")})`;
-}
-
-/** Function column: the canonical signature when we know one, else nothing (the selector is shown next to it). */
-function fnName(t: LiveTx): string | null {
-  if (t.bucket === "eth_transfer") return "ETH transfer";
-  if (t.bucket === "contract_creation") return null;
-  return t.functionSig ? canonicalSig(t.functionSig) : null;
-}
-
-/**
- * Row icon: what a wallet user gets for this transaction.
- *   ✅ clear-signed by a descriptor   ⚠️ clear-signed with warnings
- *   ❌ raw hex (no descriptor, or the library failed)
- *   💸 token transfer / approve (wallet-native)   Ξ plain ETH transfer   📦 contract creation
- * The explanation is a CSS tooltip (data-tip) so it shows at once on hover.
- */
-function iconFor(t: LiveTx): { glyph: string; tip: string; cls?: string } {
-  switch (t.bucket) {
-    case "eth_transfer":
-      return { glyph: "Ξ", tip: "ETH transfer — wallets show this natively", cls: "eth" };
-    case "token_native":
-      return { glyph: "💸", tip: "Token transfer / approve — wallets show this natively" };
-    case "contract_creation":
-      return { glyph: "📦", tip: "Contract creation" };
-    case "covered_theory":
-      if (t.status === "failed") return { glyph: "❌", tip: "Descriptor exists, but the library failed" };
-      if (t.status === "partial") return { glyph: "⚠️", tip: "Clear-signed, with warnings" };
-      return { glyph: "✅", tip: "Clear-signed by an ERC-7730 descriptor" };
-    default:
-      return { glyph: "❌", tip: "Not clear-signable — the wallet shows raw hex" };
-  }
 }
 
 function TickerIcon({ tx: t }: { tx: LiveTx }) {
@@ -386,12 +364,13 @@ function TickerRow({
   const cls = ["tickRow", active && "active", fresh && "fresh", signed && "signed", dim && "dim"]
     .filter(Boolean)
     .join(" ");
+  const name = fnName(t);
   return (
     <div className={cls} onClick={onClick} role="button" tabIndex={0}>
       <TickerIcon tx={t} />
       <span className="tickFn mono" title={t.functionSig ? `${t.functionSig}  ${t.selector}` : t.selector}>
         {t.bucket === "eth_transfer" || creation ? (
-          <span className="muted">{fnName(t) ?? ""}</span>
+          <span className="muted">{name ?? ""}</span>
         ) : (
           <a
             href={`https://4byte.sourcify.dev/?q=${t.selector}`}
@@ -399,7 +378,7 @@ function TickerRow({
             rel="noreferrer"
             onClick={(e) => e.stopPropagation()}
           >
-            {fnName(t) && <span className="fnName">{fnName(t)}</span>}
+            {name && <span className="fnName">{name}</span>}
             <span className="fnSel">{t.selector}</span>
           </a>
         )}
@@ -407,9 +386,7 @@ function TickerRow({
       <span className="tickBlock mono muted">{fmtInt(t.blockNumber)}</span>
       <span className="tickWho">{who(t)}</span>
       <span className={`tickIntent ${signed ? "" : "muted"}`} title={t.displayText ?? t.intent ?? undefined}>
-        {signed
-          ? t.displayText ?? t.intent ?? ""
-          : t.intent ?? (t.warnings[0] ? t.warnings[0].code : "")}
+        {signed ? t.displayText ?? t.intent ?? "" : t.intent ?? (t.warnings[0] ? t.warnings[0].code : "")}
       </span>
       <a
         className="tickHash mono muted"

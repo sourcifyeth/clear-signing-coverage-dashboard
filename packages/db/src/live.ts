@@ -511,6 +511,258 @@ export function recentTxs(
   return rows.map(toLiveTx);
 }
 
+// ---------------------------------------------------------------------------
+// Per-block breakdown (for the "last blocks" strip)
+
+export interface BlockStat {
+  number: number;
+  timeIso: string;
+  total: number;
+  /** plain ETH sends */
+  eth: number;
+  /** standard token transfer/approval calls, covered or not */
+  tokenStd: number;
+  /** covered_theory calls that are NOT standard token calls */
+  coveredOther: number;
+  notCovered: number;
+  creation: number;
+}
+
+/** The newest `limit` blocks, oldest first, each with its bucket breakdown. */
+export function blockStats(db: Db, limit = 60): BlockStat[] {
+  const n = Math.max(1, Math.min(limit, 1000));
+  const rows = db
+    .prepare(
+      `SELECT g.block_number AS number, MAX(g.block_time) AS block_time,
+              SUM(g.tx_count) AS total,
+              SUM(CASE WHEN g.bucket = 'eth_transfer' THEN g.tx_count ELSE 0 END) AS eth,
+              SUM(CASE WHEN g.selector IN (${STANDARD_TOKEN_SELECTORS_SQL}) THEN g.tx_count ELSE 0 END) AS token_std,
+              SUM(CASE WHEN g.bucket = 'covered_theory' AND g.selector NOT IN (${STANDARD_TOKEN_SELECTORS_SQL}) THEN g.tx_count ELSE 0 END) AS covered_other,
+              SUM(CASE WHEN g.bucket = 'not_covered' THEN g.tx_count ELSE 0 END) AS not_covered,
+              SUM(CASE WHEN g.bucket = 'contract_creation' THEN g.tx_count ELSE 0 END) AS creation
+       FROM block_groups g
+       WHERE g.block_number IN (SELECT number FROM blocks ORDER BY number DESC LIMIT ?)
+       GROUP BY g.block_number
+       ORDER BY g.block_number ASC`,
+    )
+    .all(n) as {
+    number: number;
+    block_time: string;
+    total: number;
+    eth: number;
+    token_std: number;
+    covered_other: number;
+    not_covered: number;
+    creation: number;
+  }[];
+  return rows.map((r) => ({
+    number: r.number,
+    timeIso: r.block_time,
+    total: r.total,
+    eth: r.eth,
+    tokenStd: r.token_std,
+    coveredOther: r.covered_other,
+    notCovered: r.not_covered,
+    creation: r.creation,
+  }));
+}
+
+/** The registry commit the follower last loaded the coverage set from. */
+export function registryCommit(db: Db): string | null {
+  const r = db.prepare("SELECT registry_commit FROM coverage LIMIT 1").get() as { registry_commit: string | null } | undefined;
+  return r?.registry_commit ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Window rankings: contracts and functions by transaction count, with coverage
+
+export interface RankedSelector {
+  selector: string;
+  /** registry signature, else the 4byte name, else null */
+  functionSig: string | null;
+  txCount: number;
+  covered: boolean;
+}
+
+export interface RankedContractRow {
+  toAddress: string;
+  entity: string | null;
+  /** the address has a descriptor in the registry (even if the called functions are not all covered) */
+  inRegistry: boolean;
+  txCount: number;
+  sharePct: number;
+  cumulativePct: number;
+  coveredTx: number;
+  coveredPct: number;
+  distinctSelectors: number;
+  topSelectors: RankedSelector[];
+}
+
+export interface RankedFunctionRow {
+  toAddress: string;
+  entity: string | null;
+  selector: string;
+  functionSig: string | null;
+  bucket: Bucket;
+  covered: boolean;
+  txCount: number;
+  sharePct: number;
+  cumulativePct: number;
+}
+
+export interface LiveRanking {
+  window: { hours: number; fromIso: string; toIso: string };
+  by: "contract" | "function";
+  /** contract calls counted in the window after exclusions (the denominator of sharePct) */
+  totalTx: number;
+  contracts?: RankedContractRow[];
+  functions?: RankedFunctionRow[];
+}
+
+const CALL_BUCKETS_SQL = "('covered_theory','token_native','not_covered')";
+
+export function liveRanking(
+  db: Db,
+  windowHours: number,
+  opts: { by: "contract" | "function"; limit?: number; chainId?: number } & ExcludeOptions,
+): LiveRanking {
+  const latest = latestBlock(db);
+  const toIso = latest?.timeIso ?? new Date().toISOString();
+  const fromIso = new Date(new Date(toIso).getTime() - windowHours * 3_600_000).toISOString();
+  const limit = Math.max(1, Math.min(opts.limit ?? 100, 1000));
+  const chainId = opts.chainId ?? 1;
+  // Queries that join coverage/signatures need the block_groups columns
+  // qualified, since those tables have a `selector` column too.
+  const whereFor = (alias: string) => {
+    const p = alias ? `${alias}.` : "";
+    return `${p}block_time >= ? AND ${p}block_time <= ? AND ${p}bucket IN ${CALL_BUCKETS_SQL}${excludeSql(opts, alias)}`;
+  };
+  const where = whereFor("");
+  const whereG = whereFor("g");
+
+  const totalTx = (
+    db.prepare(`SELECT COALESCE(SUM(tx_count), 0) AS n FROM block_groups WHERE ${where}`).get(fromIso, toIso) as {
+      n: number;
+    }
+  ).n;
+  const window = { hours: windowHours, fromIso, toIso };
+
+  if (opts.by === "function") {
+    const rows = db
+      .prepare(
+        `SELECT g.to_address, g.selector, MAX(g.bucket) AS bucket, SUM(g.tx_count) AS n,
+                c.function_sig, c.entity, s.name AS sig_name
+         FROM block_groups g
+         LEFT JOIN coverage c ON c.chain_id = ? AND c.address = g.to_address AND c.selector = g.selector
+         LEFT JOIN signatures s ON s.selector = g.selector
+         WHERE ${whereG}
+         GROUP BY g.to_address, g.selector
+         ORDER BY n DESC
+         LIMIT ?`,
+      )
+      .all(chainId, fromIso, toIso, limit) as {
+      to_address: string;
+      selector: string;
+      bucket: Bucket;
+      n: number;
+      function_sig: string | null;
+      entity: string | null;
+      sig_name: string | null;
+    }[];
+    let cum = 0;
+    const functions: RankedFunctionRow[] = rows.map((r) => {
+      cum += r.n;
+      return {
+        toAddress: r.to_address,
+        entity: r.entity,
+        selector: r.selector,
+        functionSig: r.function_sig ?? r.sig_name,
+        bucket: r.bucket,
+        covered: r.bucket === "covered_theory",
+        txCount: r.n,
+        sharePct: pct(r.n, totalTx),
+        cumulativePct: pct(cum, totalTx),
+      };
+    });
+    return { window, by: "function", totalTx, functions };
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT to_address, SUM(tx_count) AS n,
+              SUM(CASE WHEN bucket = 'covered_theory' THEN tx_count ELSE 0 END) AS covered,
+              COUNT(DISTINCT selector) AS selectors
+       FROM block_groups
+       WHERE ${where}
+       GROUP BY to_address
+       ORDER BY n DESC
+       LIMIT ?`,
+    )
+    .all(fromIso, toIso, limit) as { to_address: string; n: number; covered: number; selectors: number }[];
+  if (rows.length === 0) return { window, by: "contract", totalTx, contracts: [] };
+
+  const addrs = rows.map((r) => r.to_address);
+  const inList = addrs.map(() => "?").join(",");
+
+  // Entity + "is in the registry" per address.
+  const entityRows = db
+    .prepare(`SELECT address, MIN(entity) AS entity FROM coverage WHERE chain_id = ? AND address IN (${inList}) GROUP BY address`)
+    .all(chainId, ...addrs) as { address: string; entity: string | null }[];
+  const entityOf = new Map(entityRows.map((r) => [r.address, r.entity]));
+
+  // Per-selector volume for the listed contracts, with names.
+  const selRows = db
+    .prepare(
+      `SELECT g.to_address, g.selector, MAX(g.bucket) AS bucket, SUM(g.tx_count) AS n,
+              c.function_sig, s.name AS sig_name
+       FROM block_groups g
+       LEFT JOIN coverage c ON c.chain_id = ? AND c.address = g.to_address AND c.selector = g.selector
+       LEFT JOIN signatures s ON s.selector = g.selector
+       WHERE ${whereG} AND g.to_address IN (${inList})
+       GROUP BY g.to_address, g.selector
+       ORDER BY n DESC`,
+    )
+    .all(chainId, fromIso, toIso, ...addrs) as {
+    to_address: string;
+    selector: string;
+    bucket: Bucket;
+    n: number;
+    function_sig: string | null;
+    sig_name: string | null;
+  }[];
+  const selsOf = new Map<string, RankedSelector[]>();
+  for (const r of selRows) {
+    const list = selsOf.get(r.to_address) ?? [];
+    if (list.length < 6) {
+      list.push({
+        selector: r.selector,
+        functionSig: r.function_sig ?? r.sig_name,
+        txCount: r.n,
+        covered: r.bucket === "covered_theory",
+      });
+    }
+    selsOf.set(r.to_address, list);
+  }
+
+  let cum = 0;
+  const contracts: RankedContractRow[] = rows.map((r) => {
+    cum += r.n;
+    return {
+      toAddress: r.to_address,
+      entity: entityOf.get(r.to_address) ?? null,
+      inRegistry: entityOf.has(r.to_address),
+      txCount: r.n,
+      sharePct: pct(r.n, totalTx),
+      cumulativePct: pct(cum, totalTx),
+      coveredTx: r.covered,
+      coveredPct: pct(r.covered, r.n),
+      distinctSelectors: r.selectors,
+      topSelectors: selsOf.get(r.to_address) ?? [],
+    };
+  });
+  return { window, by: "contract", totalTx, contracts };
+}
+
 /** One stored transaction with its library result, or undefined if not indexed. */
 export function liveTx(db: Db, hash: string, chainId = 1): LiveTxDetailOut | undefined {
   const r = db
