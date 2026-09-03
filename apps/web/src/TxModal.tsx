@@ -14,6 +14,23 @@ import { RawTxSection } from "./RawTxSection.tsx";
 import { fetchProxyInfo, fetchVerification, type ProxyInfo, type Verification } from "./abi.ts";
 import { explainWarning } from "./warningExplainer.ts";
 
+/** Function signatures longer than this start folded with a "Show all" pill. */
+const FN_PREVIEW = 80;
+
+/** Inline text that is cut at `max` characters with a Show all / Show less pill. */
+function Expandable({ text, max }: { text: string; max: number }) {
+  const [open, setOpen] = useState(false);
+  if (text.length <= max) return <>{text}</>;
+  return (
+    <>
+      {open ? text : `${text.slice(0, max)}…`}{" "}
+      <button type="button" className="chipBtn" onClick={() => setOpen(!open)}>
+        {open ? "Show less" : "Show all"}
+      </button>
+    </>
+  );
+}
+
 /** Copies `text` to the clipboard; the icon flips to a check for a moment. */
 function CopyButton({ text }: { text: string }) {
   const [done, setDone] = useState(false);
@@ -257,15 +274,20 @@ function TxBody({ row }: { row: LiveTxDetail }) {
           </span>
         </div>
         {row.bucket !== "eth_transfer" && row.bucket !== "contract_creation" && (
-          <div className="metaRow">
-            <span className="muted">Function</span>
-            <span className="mono" title={sig ?? undefined}>
-              {sig ? clip(sig, CLIP_TEXT) : <span className="muted">unknown signature</span>}{" "}
-              <a className="fnSel" href={`https://4byte.sourcify.dev/?q=${row.selector}`} target="_blank" rel="noreferrer">
-                {row.selector}
-              </a>
-            </span>
-          </div>
+          <>
+            <div className="metaRow">
+              <span className="muted">Function</span>
+              <span className="mono">{sig ? <Expandable text={sig} max={FN_PREVIEW} /> : <span className="muted">unknown signature</span>}</span>
+            </div>
+            <div className="metaRow">
+              <span className="muted">Selector</span>
+              <span className="mono">
+                <a className="fnSel" href={`https://4byte.sourcify.dev/?q=${row.selector}`} target="_blank" rel="noreferrer">
+                  {row.selector} ↗
+                </a>
+              </span>
+            </div>
+          </>
         )}
         {row.descriptorPath && (
           <div className="metaRow">
