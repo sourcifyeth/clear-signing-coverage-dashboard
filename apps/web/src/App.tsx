@@ -49,10 +49,14 @@ export function App() {
             <img src="/sourcify.png" alt="Sourcify logo" />
             <span className="vt">sourcify.eth</span>
           </a>
-          <div className="topText">
-            Live coverage of ERC-7730 clear-signing on Ethereum mainnet, measured with the Sourcify
-            clear-signing library.
-          </div>
+          <nav className="topnav">
+            <a href={REGISTRY_REPO} target="_blank" rel="noreferrer">
+              ERC-7730 Registry ↗
+            </a>
+            <a href="https://github.com/sourcifyeth/clear-signing" target="_blank" rel="noreferrer">
+              Sourcify SDK ↗
+            </a>
+          </nav>
         </div>
       </div>
 
