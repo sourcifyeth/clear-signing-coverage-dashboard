@@ -1693,3 +1693,16 @@ footer {
   padding-top: 3px;
   padding-bottom: 3px;
 }
+
+/* nested values: space below each member, none above the block */
+.argNested {
+  padding-top: 0;
+  padding-bottom: 0;
+  gap: 0;
+}
+.argNested > .argRow {
+  padding-bottom: 4px;
+}
+.argNested > .argRow:last-child {
+  padding-bottom: 0;
+}
