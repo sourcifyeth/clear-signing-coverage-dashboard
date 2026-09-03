@@ -479,6 +479,175 @@ body {
   }
 }
 
+/* live panel */
+.sectionTitle {
+  margin: 12px 0 -4px;
+  font-size: 18px;
+  font-weight: 600;
+}
+.liveHead {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.liveHead h3 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.liveDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #64748b;
+  display: inline-block;
+}
+.liveDot.on {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.2);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.35); }
+  70% { box-shadow: 0 0 0 6px rgba(74, 222, 128, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+}
+.liveBlock a {
+  color: #93c5fd;
+  text-decoration: none;
+}
+.winSel {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+.chip.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.liveEmpty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
+}
+.live .hero .heroNum {
+  font-size: 52px;
+}
+.live .grid2 {
+  margin-bottom: 16px;
+}
+.practiceLine {
+  color: #cbd5e1;
+  margin-top: 4px;
+}
+.liveBar {
+  margin-bottom: 16px;
+}
+.tickerHead {
+  margin-bottom: 6px;
+}
+.ticker {
+  display: flex;
+  flex-direction: column;
+  max-height: 420px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.tickRow {
+  display: grid;
+  grid-template-columns: 26px 78px 150px 130px 1fr 78px;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-bottom: 1px solid #141c2e;
+  font-size: 13px;
+  cursor: pointer;
+}
+.tickRow:last-child {
+  border-bottom: none;
+}
+.tickRow:hover {
+  background: #0b1120;
+}
+.tickRow.active {
+  background: #10203a;
+}
+.tickDots {
+  display: flex;
+  gap: 4px;
+}
+.tickBlock {
+  font-size: 12px;
+}
+.tickWho {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tickFn {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tickFn a {
+  color: #93c5fd;
+  text-decoration: none;
+}
+.tickFn a:hover {
+  text-decoration: underline;
+}
+.tickIntent {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tickHash {
+  font-size: 12px;
+  text-align: right;
+  text-decoration: none;
+}
+@media (max-width: 760px) {
+  .tickRow {
+    grid-template-columns: 26px 1fr 1fr;
+  }
+  .tickBlock,
+  .tickIntent,
+  .tickHash {
+    display: none;
+  }
+}
+
+/* stored vs live decode */
+.compare {
+  display: grid;
+  gap: 16px;
+}
+.compare.two {
+  grid-template-columns: 1fr 1fr;
+}
+@media (max-width: 860px) {
+  .compare.two {
+    grid-template-columns: 1fr;
+  }
+}
+.decodeTitle {
+  font-weight: 600;
+  font-size: 14px;
+}
+.statusTag {
+  display: inline-block;
+  margin-bottom: 10px;
+  background: transparent;
+}
+
 footer {
   text-align: center;
   padding-top: 8px;

@@ -17,8 +17,13 @@
  *   headline    Stage B. Bucket totals + the 80/95 thresholds per aggregate run.
  *   practical   Stage C. One row per covered group tested with the library.
  *   tx_index    Per-transaction index (hash + labels, never contents). 7-day
- *               retention via pruneTxIndex(). Empty until the per-tx Stage B
- *               query lands.
+ *               retention via pruneTxIndex()/pruneLive(). Filled by the live
+ *               block follower.
+ *   blocks      Live follower. One row per processed block (hash + parent hash
+ *               for reorg detection, time, tx count).
+ *   block_groups Live follower. Per-block aggregate: one row per
+ *               (to, selector, bucket, status) with its tx count. Rolling-window
+ *               stats (1h / 24h / 7d) are sums over this table.
  */
 
 export const SCHEMA_SQL = `
@@ -105,4 +110,59 @@ CREATE TABLE IF NOT EXISTS tx_index (
 );
 CREATE INDEX IF NOT EXISTS tx_index_block_time ON tx_index (block_time);
 CREATE INDEX IF NOT EXISTS tx_index_to_address ON tx_index (to_address);
+CREATE INDEX IF NOT EXISTS tx_index_block_number ON tx_index (block_number DESC);
+
+CREATE TABLE IF NOT EXISTS blocks (
+  number       INTEGER PRIMARY KEY,
+  hash         TEXT    NOT NULL,
+  parent_hash  TEXT    NOT NULL,
+  block_time   TEXT    NOT NULL,
+  tx_count     INTEGER NOT NULL,
+  processed_at TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS blocks_time ON blocks (block_time);
+
+CREATE TABLE IF NOT EXISTS block_groups (
+  block_number INTEGER NOT NULL,
+  block_time   TEXT    NOT NULL DEFAULT '',   -- denormalized from blocks, so window queries need no join
+  to_address   TEXT    NOT NULL DEFAULT '',   -- '' for contract creation
+  selector     TEXT    NOT NULL,
+  bucket       TEXT    NOT NULL,
+  status       TEXT    NOT NULL DEFAULT '',   -- pass/partial/failed for covered_theory, else ''
+  tx_count     INTEGER NOT NULL,
+  PRIMARY KEY (block_number, to_address, selector, status)
+);
 `;
+
+/**
+ * Indexes over columns that may have been added by migration; created after
+ * ADDED_COLUMNS are applied.
+ */
+export const POST_MIGRATION_SQL = `
+-- Covering index for the rolling-window queries (range on block_time, then
+-- group by bucket / to_address / selector / status).
+CREATE INDEX IF NOT EXISTS block_groups_window
+  ON block_groups (block_time, bucket, to_address, selector, status, tx_count);
+`;
+
+/**
+ * Columns added after a table's first version. Applied with
+ * ALTER TABLE ... ADD COLUMN when missing, so an existing database migrates in
+ * place. `backfill` runs once right after the column is added.
+ */
+export const ADDED_COLUMNS: { table: string; name: string; ddl: string; backfill?: string }[] = [
+  { table: "tx_index", name: "block_hash", ddl: "block_hash TEXT" },
+  { table: "tx_index", name: "status", ddl: "status TEXT" },
+  { table: "tx_index", name: "warnings_json", ddl: "warnings_json TEXT" },
+  // Library result for covered transactions: a one-line intent, and the full
+  // DisplayModel JSON (capped at 8 KB, see live.ts).
+  { table: "tx_index", name: "intent", ddl: "intent TEXT" },
+  { table: "tx_index", name: "display_json", ddl: "display_json TEXT" },
+  {
+    table: "block_groups",
+    name: "block_time",
+    ddl: "block_time TEXT NOT NULL DEFAULT ''",
+    backfill:
+      "UPDATE block_groups SET block_time = COALESCE((SELECT b.block_time FROM blocks b WHERE b.number = block_groups.block_number), '')",
+  },
+];

@@ -6,6 +6,7 @@
 
 import type { Db } from "./index.js";
 import type { Bucket, PracticalStatus } from "./write.js";
+import { downsampleCurve, pct } from "./ranking.js";
 
 export interface RunRow {
   id: number;
@@ -103,28 +104,6 @@ export interface ReportOut {
       curve: { n: number; pct: number }[];
     };
   };
-}
-
-const pct = (n: number, d: number) => (d === 0 ? 0 : (n / d) * 100);
-
-/**
- * Downsample the cumulative curve to at most `maxPoints`. The first `dense`
- * ranks are kept exact because that is where the curve is steep; the rest is
- * strided. The final rank is always included.
- */
-function downsampleCurve(
-  points: { n: number; pct: number }[],
-  maxPoints: number,
-): { n: number; pct: number }[] {
-  if (points.length <= maxPoints) return points;
-  const dense = Math.floor(maxPoints * 0.6);
-  const head = points.slice(0, dense);
-  const rest = points.slice(dense);
-  const stride = Math.ceil(rest.length / (maxPoints - dense - 1));
-  const tail = rest.filter((_, i) => i % stride === 0);
-  const last = points[points.length - 1];
-  if (tail[tail.length - 1] !== last) tail.push(last);
-  return head.concat(tail);
 }
 
 export function readReport(
@@ -405,6 +384,9 @@ export function readCoverage(db: Db, chainId?: number): CoverageRowOut[] {
   }));
 }
 
-export function countTable(db: Db, table: "coverage" | "runs" | "tx_groups" | "ranking" | "practical" | "tx_index"): number {
+export function countTable(
+  db: Db,
+  table: "coverage" | "runs" | "tx_groups" | "ranking" | "practical" | "tx_index" | "blocks" | "block_groups",
+): number {
   return (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
 }

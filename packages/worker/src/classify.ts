@@ -13,6 +13,8 @@
  * the registry counts as covered, not merely native.
  */
 
+import { computeRanking } from "@ccd/db";
+import type { CoveredCalldata } from "@ccd/coverage";
 import type { TxGroup } from "./bq/aggregate.js";
 import { type CoverageLookup, key3 } from "./coverage/loadCoverageSet.js";
 
@@ -43,30 +45,41 @@ export interface ClassifiedGroup extends TxGroup {
   descriptorPath?: string;
 }
 
+/**
+ * Bucket for one (to, selector) pair. Shared by Stage B (per group) and the
+ * live follower (per transaction). Returns the coverage row on a hit.
+ */
+export function bucketFor(
+  toAddress: string | null,
+  selector: string,
+  chainId: number,
+  cov: CoverageLookup,
+): { bucket: Bucket; hit?: CoveredCalldata } {
+  if (toAddress === null) return { bucket: "contract_creation" };
+  if (selector === "0x" || selector === "0x00000000") return { bucket: "eth_transfer" };
+  const hit = cov.bySelector.get(key3(chainId, toAddress, selector));
+  if (hit) return { bucket: "covered_theory", hit };
+  if (STANDARD_TOKEN_SELECTORS.has(selector)) return { bucket: "token_native" };
+  return { bucket: "not_covered" };
+}
+
 export function classifyGroup(
   g: TxGroup,
   chainId: number,
   cov: CoverageLookup,
 ): ClassifiedGroup {
-  if (g.toAddress === null) return { ...g, chainId, bucket: "contract_creation" };
-  if (g.selector === "0x" || g.selector === "0x00000000") {
-    return { ...g, chainId, bucket: "eth_transfer" };
-  }
-  const hit = cov.bySelector.get(key3(chainId, g.toAddress, g.selector));
+  const { bucket, hit } = bucketFor(g.toAddress, g.selector, chainId, cov);
   if (hit) {
     return {
       ...g,
       chainId,
-      bucket: "covered_theory",
+      bucket,
       functionSig: hit.functionSig,
       entity: hit.entity,
       descriptorPath: hit.descriptorPath,
     };
   }
-  if (STANDARD_TOKEN_SELECTORS.has(g.selector)) {
-    return { ...g, chainId, bucket: "token_native" };
-  }
-  return { ...g, chainId, bucket: "not_covered" };
+  return { ...g, chainId, bucket };
 }
 
 export interface BucketTotals {
@@ -122,38 +135,18 @@ export function buildReport(groups: ClassifiedGroup[]): CoverageReport {
   // Denominators.
   const contractCalls = totalTx - buckets.eth_transfer - buckets.contract_creation;
 
-  // Rank not-covered contracts by volume, then walk the cumulative coverage.
-  const byContract = new Map<string, RankedContract>();
-  for (const g of groups) {
-    if (g.bucket !== "not_covered" || g.toAddress === null) continue;
-    let rc = byContract.get(g.toAddress);
-    if (!rc) {
-      rc = { toAddress: g.toAddress, txCount: 0, topSelectors: [], cumulativePct: 0 };
-      byContract.set(g.toAddress, rc);
-    }
-    rc.txCount += g.txCount;
-    rc.topSelectors.push({ selector: g.selector, txCount: g.txCount });
-  }
-  const contracts = [...byContract.values()].sort((a, b) => b.txCount - a.txCount);
-  for (const c of contracts) {
-    c.topSelectors.sort((a, b) => b.txCount - a.txCount);
-    c.topSelectors = c.topSelectors.slice(0, 5);
-  }
-
-  // Cumulative coverage over the "all txs" denominator. ETH transfers and
-  // standard token transfers are already clear-signable natively, so the walk
-  // starts from that baseline and adds each not-covered contract on top. This
-  // makes "how many contracts to reach 80% / 95%" actionable.
-  const baseline = buckets.covered_theory + buckets.token_native + buckets.eth_transfer;
-  let cumulativeCovered = baseline;
-  let contractsToReach80 = pct(baseline, totalTx) >= 80 ? 0 : Infinity;
-  let contractsToReach95 = pct(baseline, totalTx) >= 95 ? 0 : Infinity;
-  contracts.forEach((c, i) => {
-    cumulativeCovered += c.txCount;
-    c.cumulativePct = pct(cumulativeCovered, totalTx);
-    if (contractsToReach80 === Infinity && c.cumulativePct >= 80) contractsToReach80 = i + 1;
-    if (contractsToReach95 === Infinity && c.cumulativePct >= 95) contractsToReach95 = i + 1;
-  });
+  // Rank not-covered contracts by volume, then walk the cumulative coverage
+  // (shared with the live rolling-window summary in @ccd/db). ETH transfers
+  // and standard token transfers are already clear-signable natively, so the
+  // walk starts from that baseline and adds each not-covered contract on top.
+  // This makes "how many contracts to reach 80% / 95%" actionable.
+  const notCovered = groups
+    .filter((g) => g.bucket === "not_covered" && g.toAddress !== null)
+    .map((g) => ({ toAddress: g.toAddress as string, selector: g.selector, txCount: g.txCount }));
+  const ranking = computeRanking(notCovered, buckets, totalTx);
+  const contracts: RankedContract[] = ranking.contracts;
+  const contractsToReach80 = ranking.contractsToReach80 ?? Infinity;
+  const contractsToReach95 = ranking.contractsToReach95 ?? Infinity;
 
   return {
     totalTx,

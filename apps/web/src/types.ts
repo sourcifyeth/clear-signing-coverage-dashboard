@@ -62,6 +62,69 @@ export interface FeedItem {
   txCount: number;
 }
 
+// --- live (block follower) ---
+
+export type BucketKey = keyof Buckets;
+export type LiveStatus = "pass" | "partial" | "failed";
+
+export interface LatestBlock {
+  number: number;
+  hash: string;
+  timeIso: string;
+  txCount: number;
+  processedAtIso?: string;
+}
+
+export interface LiveSummary {
+  window: { hours: number; fromIso: string; toIso: string };
+  blocks: number;
+  firstBlock: number | null;
+  lastBlock: number | null;
+  totalTx: number;
+  buckets: Buckets;
+  headline: {
+    theoryPctOfAll: number;
+    theoryPlusNativePctOfAll: number;
+    theoryPctOfContractCalls: number;
+  };
+  practice: { passTx: number; partialTx: number; failedTx: number; practicePct: number };
+  ranking: {
+    contracts: RankedContract[];
+    totalContracts: number;
+    contractsToReach80: number | null;
+    contractsToReach95: number | null;
+    curve: { n: number; pct: number }[];
+  };
+}
+
+export interface LiveTx {
+  hash: string;
+  blockNumber: number;
+  blockTimeIso: string;
+  toAddress: string | null;
+  selector: string;
+  bucket: BucketKey;
+  status: LiveStatus | null;
+  warnings: { code: string; message: string }[];
+  /** one-line intent the library produced (covered txs only) */
+  intent: string | null;
+  entity: string | null;
+  functionSig: string | null;
+}
+
+/** /api/live/tx/:hash — a stored row plus the library's DisplayModel. */
+export interface LiveTxDetail extends LiveTx {
+  blockHash: string | null;
+  /** a DisplayModel, or { truncated: true, intent, interpolatedIntent, warnings, fieldCount } */
+  display: unknown | null;
+}
+
+export interface LiveBlockEvent {
+  block: LatestBlock;
+  txs: LiveTx[];
+  summary: LiveSummary;
+}
+
 export interface Report {
   generatedAtIso: string;
   chainId: number;

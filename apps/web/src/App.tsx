@@ -12,89 +12,100 @@ import {
 import type { Report, PracticalReport } from "./types.ts";
 import { labelFor } from "./labels.ts";
 import { TxInspector } from "./TxInspector.tsx";
-
-const fmtInt = (n: number) => n.toLocaleString("en-US");
-const fmtPct = (n: number) => `${n.toFixed(1)}%`;
-const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
-
-const BUCKETS = [
-  { key: "covered_theory", label: "Covered by descriptor", color: "#4ade80" },
-  { key: "eth_transfer", label: "ETH transfer", color: "#38bdf8" },
-  { key: "token_native", label: "Token transfer / approve", color: "#818cf8" },
-  { key: "not_covered", label: "Not covered", color: "#f87171" },
-  { key: "contract_creation", label: "Contract creation", color: "#64748b" },
-] as const;
+import { LivePanel, type ToggleState } from "./LivePanel.tsx";
+import { BucketBar, Toggle, Stat, numOr } from "./BucketBar.tsx";
+import { fmtInt, fmtPct, short, signablePct } from "./buckets.ts";
 
 export function App() {
-  const [report, setReport] = useState<Report | null>(null);
+  const [report, setReport] = useState<Report | null | undefined>(undefined);
   const [practical, setPractical] = useState<PracticalReport | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [countEth, setCountEth] = useState(true);
   const [countToken, setCountToken] = useState(true);
+  const [seedHash, setSeedHash] = useState<string | undefined>(undefined);
 
   useEffect(() => {
+    // Both snapshots are optional: the live section stands on its own.
     fetch("/api/report/latest")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`API ${r.status}`))))
+      .then((r) => (r.ok ? r.json() : null))
       .then(setReport)
-      .catch((e) => setError(e.message));
-    // Practical run is optional — ignore if not generated yet.
+      .catch(() => setReport(null));
     fetch("/api/practical/latest")
       .then((r) => (r.ok ? r.json() : null))
       .then(setPractical)
       .catch(() => setPractical(null));
   }, []);
 
-  if (error) {
-    return (
-      <div className="wrap">
-        <div className="card error">
-          <h2>Could not load report</h2>
-          <p>{error}</p>
-          <p className="muted">
-            Start the API (<code>npm run api</code>) and generate a report with{" "}
-            <code>npm run stage-b -- --out out/report-24h.json</code>.
-          </p>
-        </div>
-      </div>
-    );
+  const state: ToggleState = { countEth, countToken, setCountEth, setCountToken };
+
+  function inspect(hash: string) {
+    setSeedHash(hash);
+    document.getElementById("inspector")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
-  if (!report) return <div className="wrap muted">Loading…</div>;
 
   return (
-    <Dashboard
-      report={report}
-      practical={practical}
-      state={{ countEth, countToken, setCountEth, setCountToken }}
-    />
+    <div className="wrap">
+      <header className="head">
+        <div>
+          <h1>Clear-Signing Coverage</h1>
+          <p className="sub">
+            Share of Ethereum mainnet transactions that can be clear-signed with ERC-7730
+            descriptors, and which contracts to add next.
+          </p>
+        </div>
+        {report && (
+          <div className="meta">
+            <div>
+              <span className="muted">Snapshot</span> {report.timeframe.hours}h ending{" "}
+              {report.timeframe.endIso.replace("T", " ").replace(".000Z", "Z")}
+            </div>
+            <div>
+              <span className="muted">Registry</span>{" "}
+              {report.registryCommit ? report.registryCommit.slice(0, 8) : "—"}
+            </div>
+            <div>
+              <span className="muted">Generated</span>{" "}
+              {report.generatedAtIso.replace("T", " ").slice(0, 19)}
+            </div>
+          </div>
+        )}
+      </header>
+
+      {/* Live: block follower */}
+      <LivePanel state={state} onInspect={inspect} />
+
+      {/* Live decode (stored result + run now) */}
+      <TxInspector
+        examples={practical?.report.examples ?? []}
+        feed={practical?.report.feed ?? []}
+        seed={seedHash}
+      />
+
+      {/* Theory vs practice (BigQuery sample) */}
+      {practical && <PracticalPanel practical={practical} onInspect={inspect} />}
+
+      {/* 24h BigQuery snapshot */}
+      {report === undefined ? (
+        <div className="muted small">Loading snapshot…</div>
+      ) : report === null ? (
+        <section className="card">
+          <h3>24h BigQuery snapshot</h3>
+          <p className="muted small">
+            No snapshot yet. Generate one with <code>npm run stage-b -- --hours 24</code> (needs
+            BigQuery credentials), or <code>npm run import-json</code> to load an existing JSON.
+          </p>
+        </section>
+      ) : (
+        <Snapshot report={report} state={state} />
+      )}
+    </div>
   );
 }
 
-interface ToggleState {
-  countEth: boolean;
-  countToken: boolean;
-  setCountEth: (v: boolean) => void;
-  setCountToken: (v: boolean) => void;
-}
-
-function Dashboard({
-  report,
-  practical,
-  state,
-}: {
-  report: Report;
-  practical: PracticalReport | null;
-  state: ToggleState;
-}) {
+function Snapshot({ report, state }: { report: Report; state: ToggleState }) {
   const r = report.report;
   const b = r.buckets;
   const total = r.totalTx;
-  const [seedHash, setSeedHash] = useState<string | undefined>(undefined);
-
-  const signable =
-    b.covered_theory +
-    (state.countEth ? b.eth_transfer : 0) +
-    (state.countToken ? b.token_native : 0);
-  const signablePct = total ? (signable / total) * 100 : 0;
+  const tf = report.timeframe;
 
   const chartData = useMemo(() => {
     // The API sends a downsampled cumulative curve over the full ranking, so
@@ -112,49 +123,23 @@ function Dashboard({
     return pts;
   }, [r]);
 
-  const tf = report.timeframe;
-
   return (
-    <div className="wrap">
-      <header className="head">
-        <div>
-          <h1>Clear-Signing Coverage</h1>
-          <p className="sub">
-            Share of Ethereum mainnet transactions that can be clear-signed with ERC-7730
-            descriptors, and which contracts to add next.
-          </p>
-        </div>
-        <div className="meta">
-          <div>
-            <span className="muted">Window</span> {tf.hours}h ending{" "}
-            {tf.endIso.replace("T", " ").replace(".000Z", "Z")}
-          </div>
-          <div>
-            <span className="muted">Transactions</span> {fmtInt(total)}
-          </div>
-          <div>
-            <span className="muted">Registry</span>{" "}
-            {report.registryCommit ? report.registryCommit.slice(0, 8) : "—"}
-          </div>
-          <div>
-            <span className="muted">Generated</span>{" "}
-            {report.generatedAtIso.replace("T", " ").slice(0, 19)}
-          </div>
-        </div>
-      </header>
+    <>
+      <h2 className="sectionTitle">
+        24h BigQuery snapshot
+        <span className="muted small">
+          {" "}
+          · {tf.hours}h ending {tf.endIso.replace("T", " ").replace(".000Z", "Z")} · {fmtInt(total)} transactions
+        </span>
+      </h2>
 
       {/* Hero + toggles */}
       <section className="grid2">
         <div className="card hero">
-          <div className="heroNum">{fmtPct(signablePct)}</div>
+          <div className="heroNum">{fmtPct(signablePct(b, total, state.countEth, state.countToken))}</div>
           <div className="heroLabel">of transactions clear-signable</div>
           <div className="toggles">
-            <Toggle
-              on={true}
-              disabled
-              label={`Descriptors ${fmtPct(r.headline.theoryPctOfAll)}`}
-              swatch="#4ade80"
-            />
+            <Toggle on disabled label={`Descriptors ${fmtPct(r.headline.theoryPctOfAll)}`} swatch="#4ade80" />
             <Toggle
               on={state.countEth}
               onClick={() => state.setCountEth(!state.countEth)}
@@ -192,14 +177,8 @@ function Dashboard({
           </p>
           <div className="denoms">
             <Stat label="Descriptors, of all txs" value={fmtPct(r.headline.theoryPctOfAll)} />
-            <Stat
-              label="Descriptors + native"
-              value={fmtPct(r.headline.theoryPlusNativePctOfAll)}
-            />
-            <Stat
-              label="Descriptors, of contract calls"
-              value={fmtPct(r.headline.theoryPctOfContractCalls)}
-            />
+            <Stat label="Descriptors + native" value={fmtPct(r.headline.theoryPlusNativePctOfAll)} />
+            <Stat label="Descriptors, of contract calls" value={fmtPct(r.headline.theoryPctOfContractCalls)} />
           </div>
         </div>
       </section>
@@ -207,41 +186,8 @@ function Dashboard({
       {/* Bucket bar */}
       <section className="card">
         <h3>Where the transactions go</h3>
-        <div className="bar">
-          {BUCKETS.map((bk) => {
-            const v = b[bk.key];
-            const w = total ? (v / total) * 100 : 0;
-            if (w <= 0) return null;
-            return (
-              <div
-                key={bk.key}
-                className="barSeg"
-                style={{ width: `${w}%`, background: bk.color }}
-                title={`${bk.label}: ${fmtInt(v)} (${fmtPct(w)})`}
-              />
-            );
-          })}
-        </div>
-        <div className="legend">
-          {BUCKETS.map((bk) => (
-            <div key={bk.key} className="legendItem">
-              <span className="swatch" style={{ background: bk.color }} />
-              {bk.label}
-              <span className="muted"> · {fmtInt(b[bk.key])} · {fmtPct((b[bk.key] / total) * 100)}</span>
-            </div>
-          ))}
-        </div>
+        <BucketBar buckets={b} total={total} />
       </section>
-
-      {/* Live decode */}
-      <TxInspector
-        examples={practical?.report.examples ?? []}
-        feed={practical?.report.feed ?? []}
-        seed={seedHash}
-      />
-
-      {/* Theory vs practice */}
-      {practical && <PracticalPanel practical={practical} onInspect={setSeedHash} />}
 
       {/* Cumulative chart */}
       <section className="card">
@@ -335,12 +281,8 @@ function Dashboard({
       <footer className="muted small">
         Source: {report.source} · scanned {(report.bytesProcessed / 1e9).toFixed(2)} GB
       </footer>
-    </div>
+    </>
   );
-}
-
-function numOr(n: number | null | undefined) {
-  return typeof n === "number" && Number.isFinite(n) ? n : "—";
 }
 
 function PracticalPanel({
@@ -360,7 +302,7 @@ function PracticalPanel({
   };
   return (
     <section className="card">
-      <h3>Theory vs practice</h3>
+      <h3>Theory vs practice (BigQuery sample)</h3>
       <p className="muted small">
         Runs the Sourcify clear-signing library on a sample transaction per covered contract
         function, to check it actually renders — not just that a descriptor exists. Sampled
@@ -425,14 +367,7 @@ function PracticalPanel({
                     "—"
                   )}
                   {pr.sampleTxHash && (
-                    <button
-                      className="chip"
-                      style={{ marginTop: 6 }}
-                      onClick={() => {
-                        onInspect(pr.sampleTxHash);
-                        window.scrollTo({ top: 0, behavior: "smooth" });
-                      }}
-                    >
+                    <button className="chip" style={{ marginTop: 6 }} onClick={() => onInspect(pr.sampleTxHash)}>
                       decode sample ↑
                     </button>
                   )}
@@ -443,35 +378,5 @@ function PracticalPanel({
         </table>
       )}
     </section>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="statBox">
-      <div className="statVal">{value}</div>
-      <div className="statLbl muted">{label}</div>
-    </div>
-  );
-}
-
-function Toggle({
-  on,
-  onClick,
-  label,
-  swatch,
-  disabled,
-}: {
-  on: boolean;
-  onClick?: () => void;
-  label: string;
-  swatch: string;
-  disabled?: boolean;
-}) {
-  return (
-    <button className={`toggle ${on ? "on" : ""}`} onClick={onClick} disabled={disabled}>
-      <span className="swatch" style={{ background: swatch, opacity: on ? 1 : 0.3 }} />
-      {label}
-    </button>
   );
 }

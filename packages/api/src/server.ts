@@ -18,9 +18,18 @@
  *   GET /api/descriptor?path=       -> one descriptor JSON from the registry checkout
  *   GET /api/tx/:hash               -> { chainId, hash, to, from, input, value } via RPC
  *
+ * Live (written by the block follower, `npm run follow`):
+ *   GET /api/live/latest            -> { latest: { number, hash, timeIso, txCount } | null, blocks }
+ *   GET /api/live/summary?window=1h|24h|7d&limit=200&curve=500
+ *                                   -> rolling-window buckets, practice, ranking
+ *   GET /api/live/recent?limit=100&bucket=&since=
+ *                                   -> newest tx rows (hash + labels + intent, no contents)
+ *   GET /api/live/tx/:hash          -> one stored row incl. the library's DisplayModel
+ *   GET /api/live/stream            -> SSE; `block` events as new blocks land
+ *
  * Env: DB_PATH (default <repo>/out/coverage.sqlite), PORT (default 8787),
  *      REGISTRY_PATH (default sibling ../clear-signing-erc7730-registry),
- *      RPC_URL (default a public mainnet endpoint).
+ *      RPC_URL (else DRPC_API_KEY -> DRPC, else a public mainnet endpoint).
  */
 
 import fs from "node:fs";
@@ -28,7 +37,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
-import { openDb, defaultDbPath, listRuns, readReport, readPractical, countTable } from "@ccd/db";
+import {
+  openDb,
+  defaultDbPath,
+  listRuns,
+  readReport,
+  readPractical,
+  countTable,
+  latestBlock,
+  liveBlockCount,
+  liveSummary,
+  recentTxs,
+  liveTx,
+  type Bucket,
+} from "@ccd/db";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
@@ -37,7 +59,15 @@ const PORT = Number(process.env.PORT ?? 8787);
 const REGISTRY_PATH = path.resolve(
   process.env.REGISTRY_PATH ?? path.join(REPO_ROOT, "../clear-signing-erc7730-registry"),
 );
-const RPC_URL = process.env.RPC_URL ?? "https://ethereum-rpc.publicnode.com";
+// Same resolution as the follower. The URL may embed a key: never log it.
+const RPC_URL =
+  process.env.RPC_URL ??
+  (process.env.DRPC_API_KEY
+    ? `https://lb.drpc.org/ethereum/${process.env.DRPC_API_KEY}`
+    : "https://ethereum-rpc.publicnode.com");
+
+const WINDOWS: Record<string, number> = { "1h": 1, "24h": 24, "7d": 168 };
+const BUCKET_NAMES = new Set<string>(["contract_creation", "eth_transfer", "covered_theory", "token_native", "not_covered"]);
 
 // One long-lived connection. WAL mode lets the worker write while we read.
 const db = openDb(DB_PATH);
@@ -56,7 +86,7 @@ function intQuery(v: unknown, fallback: number): number {
 }
 
 app.get("/api/health", (_req, res) =>
-  res.json({ ok: true, dbPath: DB_PATH, runs: countTable(db, "runs") }),
+  res.json({ ok: true, dbPath: DB_PATH, runs: countTable(db, "runs"), liveBlocks: liveBlockCount(db) }),
 );
 
 app.get("/api/runs", (req, res) => {
@@ -86,6 +116,87 @@ app.get("/api/practical/:id", (req, res) => {
   const report = readPractical(db, id);
   if (!report) return res.status(404).json({ error: "no practical run found" });
   res.json(report);
+});
+
+// --- live (block follower) ---
+
+app.get("/api/live/latest", (_req, res) => {
+  res.set("Cache-Control", "no-cache");
+  res.json({ latest: latestBlock(db), blocks: liveBlockCount(db) });
+});
+
+app.get("/api/live/summary", (req, res) => {
+  const w = String(req.query.window ?? "24h");
+  const hours = WINDOWS[w];
+  if (!hours) return res.status(400).json({ error: "window must be 1h, 24h or 7d" });
+  res.set("Cache-Control", "no-cache");
+  res.json(
+    liveSummary(db, hours, {
+      limit: intQuery(req.query.limit, 200),
+      curvePoints: intQuery(req.query.curve, 500),
+    }),
+  );
+});
+
+app.get("/api/live/recent", (req, res) => {
+  const bucket = typeof req.query.bucket === "string" && BUCKET_NAMES.has(req.query.bucket) ? (req.query.bucket as Bucket) : undefined;
+  const since = req.query.since !== undefined ? Number(req.query.since) : undefined;
+  res.set("Cache-Control", "no-cache");
+  res.json(
+    recentTxs(db, {
+      limit: intQuery(req.query.limit, 100),
+      bucket,
+      sinceBlock: Number.isFinite(since) ? since : undefined,
+    }),
+  );
+});
+
+// A stored transaction with the library result the follower recorded.
+app.get("/api/live/tx/:hash", (req, res) => {
+  const hash = String(req.params.hash).trim();
+  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) return res.status(400).json({ error: "invalid tx hash" });
+  const row = liveTx(db, hash);
+  if (!row) return res.status(404).json({ error: "transaction not in the live index" });
+  res.set("Cache-Control", "no-cache");
+  res.json(row);
+});
+
+// One poller for all SSE clients: check the head every 2s; when it advances,
+// build the payload once and broadcast it.
+const sseClients = new Set<express.Response>();
+let ssePrevBlock = latestBlock(db)?.number ?? null;
+setInterval(() => {
+  if (sseClients.size === 0) {
+    ssePrevBlock = latestBlock(db)?.number ?? ssePrevBlock;
+    return;
+  }
+  const lb = latestBlock(db);
+  if (!lb || (ssePrevBlock !== null && lb.number <= ssePrevBlock)) return;
+  const payload = JSON.stringify({
+    block: { number: lb.number, hash: lb.hash, timeIso: lb.timeIso, txCount: lb.txCount },
+    txs: recentTxs(db, { limit: 300, sinceBlock: ssePrevBlock ?? lb.number - 1 }),
+    summary: liveSummary(db, 24, { limit: 50 }),
+  });
+  ssePrevBlock = lb.number;
+  for (const c of sseClients) c.write(`event: block\ndata: ${payload}\n\n`);
+}, 2000);
+setInterval(() => {
+  for (const c of sseClients) c.write(`: ping\n\n`);
+}, 15_000);
+
+app.get("/api/live/stream", (req, res) => {
+  res.set({
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  res.flushHeaders();
+  res.write(`event: hello\ndata: ${JSON.stringify({ latest: latestBlock(db) })}\n\n`);
+  sseClients.add(res);
+  req.on("close", () => {
+    sseClients.delete(res);
+  });
 });
 
 // --- browser live-decode support ---

@@ -12,6 +12,7 @@
     "stage-b": "tsx packages/worker/src/cli.ts",
     "stage-c": "tsx packages/worker/src/cliC.ts",
     "import-json": "tsx packages/worker/src/importJson.ts",
+    "follow": "tsx packages/worker/src/follower/follow.ts",
     "api": "tsx packages/api/src/server.ts",
     "web": "npm run dev --workspace apps/web",
     "dev": "npm run api & npm run web"

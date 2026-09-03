@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { isFieldGroup } from "@ethereum-sourcify/clear-signing";
 import type { DisplayModel, DisplayField } from "@ethereum-sourcify/clear-signing";
 import { decodeTxHash, type DecodeOutcome } from "./decoder.ts";
-import type { FeedItem } from "./types.ts";
+import type { FeedItem, LiveTxDetail } from "./types.ts";
+import { STATUS_COLOR, fmtInt } from "./buckets.ts";
 
 export interface Example {
   hash: string;
@@ -11,18 +12,32 @@ export interface Example {
   toAddress: string;
 }
 
-const fmtInt = (n: number) => n.toLocaleString("en-US");
-const DOT: Record<FeedItem["status"], string> = {
-  pass: "#4ade80",
-  partial: "#eab308",
-  failed: "#f87171",
-};
+type Status = DecodeOutcome["status"];
 
-const STATUS_META: Record<DecodeOutcome["status"], { color: string; text: string }> = {
+const STATUS_META: Record<Status, { color: string; text: string }> = {
   clear: { color: "#4ade80", text: "Clear-signed" },
   partial: { color: "#eab308", text: "Clear-signed (with warnings)" },
   raw: { color: "#f87171", text: "Not clear-signable — raw calldata" },
 };
+
+const LIVE_TO_STATUS: Record<"pass" | "partial" | "failed", Status> = {
+  pass: "clear",
+  partial: "partial",
+  failed: "raw",
+};
+
+/** The reduced record stored when a DisplayModel exceeded the size cap. */
+interface TruncatedDisplay {
+  truncated: true;
+  intent?: DisplayModel["intent"];
+  interpolatedIntent?: string;
+  warnings: { code: string; message: string }[];
+  fieldCount: number;
+}
+
+function isTruncated(d: unknown): d is TruncatedDisplay {
+  return typeof d === "object" && d !== null && (d as { truncated?: boolean }).truncated === true;
+}
 
 export function TxInspector({
   examples,
@@ -36,6 +51,7 @@ export function TxInspector({
   const [hash, setHash] = useState(seed ?? "");
   const [loading, setLoading] = useState(false);
   const [outcome, setOutcome] = useState<DecodeOutcome | null>(null);
+  const [stored, setStored] = useState<LiveTxDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeHash, setActiveHash] = useState<string | null>(null);
 
@@ -44,15 +60,24 @@ export function TxInspector({
     if (!/^0x[0-9a-fA-F]{64}$/.test(clean)) {
       setError("Enter a 66-character mainnet transaction hash (0x + 64 hex).");
       setOutcome(null);
+      setStored(null);
       return;
     }
     setLoading(true);
     setError(null);
     setOutcome(null);
+    setStored(null);
     setActiveHash(clean.toLowerCase());
+    // Stored result (from the follower) and a fresh run, side by side.
+    const storedP = fetch(`/api/live/tx/${clean}`)
+      .then((r) => (r.ok ? (r.json() as Promise<LiveTxDetail>) : null))
+      .catch(() => null);
     try {
-      setOutcome(await decodeTxHash(clean));
+      const [s, o] = await Promise.all([storedP, decodeTxHash(clean)]);
+      setStored(s);
+      setOutcome(o);
     } catch (e) {
+      setStored(await storedP);
       setError((e as Error).message);
     } finally {
       setLoading(false);
@@ -69,11 +94,12 @@ export function TxInspector({
   }, [seed]);
 
   return (
-    <section className="card">
+    <section className="card" id="inspector">
       <h3>Clear-sign a transaction live</h3>
       <p className="muted small">
-        Paste any Ethereum mainnet transaction hash. The dashboard fetches it over RPC and
-        runs the Sourcify library in your browser — nothing is stored.
+        Paste any Ethereum mainnet transaction hash, or click one in the live ticker above. The
+        dashboard fetches it over RPC and runs the Sourcify library in your browser. If the
+        follower already processed it, its stored result is shown alongside for comparison.
       </p>
 
       <div className="inspectRow">
@@ -110,12 +136,26 @@ export function TxInspector({
       )}
 
       {error && <div className="inspectError small">{error}</div>}
-      {outcome && <DecodeView outcome={outcome} />}
+
+      {(stored || outcome) && (
+        <div className={`compare ${stored && outcome ? "two" : ""}`}>
+          {stored && <StoredView row={stored} />}
+          {outcome && (
+            <DecodeView
+              model={outcome.model}
+              status={outcome.status}
+              hash={outcome.tx.hash}
+              title="Run live now"
+              subtitle="fetched over RPC, decoded in your browser"
+            />
+          )}
+        </div>
+      )}
 
       {feed.length > 0 && (
         <div className="feed">
           <div className="feedHead muted small">
-            Transactions we decoded ({feed.length}) — click one to clear-sign it live
+            BigQuery sample transactions ({feed.length}) — click one to clear-sign it live
           </div>
           <div className="feedList">
             {feed.map((it) => (
@@ -125,7 +165,7 @@ export function TxInspector({
                 onClick={() => run(it.hash)}
                 title={it.functionSig ?? it.selector}
               >
-                <span className="feedDot" style={{ background: DOT[it.status] }} />
+                <span className="feedDot" style={{ background: STATUS_COLOR[it.status] }} />
                 <span className="feedEntity">{it.entity ?? "?"}</span>
                 <span className="feedFn mono">
                   {it.functionSig ? it.functionSig.split("(")[0] : it.selector}
@@ -141,24 +181,87 @@ export function TxInspector({
   );
 }
 
-function DecodeView({ outcome }: { outcome: DecodeOutcome }) {
-  const { model, tx, status } = outcome;
+/** What the follower stored for this transaction when its block landed. */
+function StoredView({ row }: { row: LiveTxDetail }) {
+  const subtitle = `stored at block ${fmtInt(row.blockNumber)}`;
+  if (!row.status || row.display === null) {
+    // Not a covered tx: only the bucket was stored, no library run.
+    return (
+      <div className="decode">
+        <div className="decodeHead">
+          <span className="decodeTitle">Stored by the follower</span>
+          <span className="muted small">{subtitle}</span>
+        </div>
+        <div className="muted small">
+          Bucket <b>{row.bucket.replace("_", " ")}</b>
+          {row.bucket === "not_covered" && " — no descriptor in the registry, so the library was not run."}
+          {row.bucket === "token_native" && " — standard token function; wallets render it natively."}
+          {row.bucket === "eth_transfer" && " — plain ETH send; wallets render it natively."}
+        </div>
+      </div>
+    );
+  }
+  const status = LIVE_TO_STATUS[row.status];
+  if (isTruncated(row.display)) {
+    const d = row.display;
+    const meta = STATUS_META[status];
+    return (
+      <div className="decode">
+        <div className="decodeHead">
+          <span className="decodeTitle">Stored by the follower</span>
+          <span className="muted small">{subtitle}</span>
+        </div>
+        <span className="tag" style={{ color: meta.color, borderColor: meta.color }}>
+          ● {meta.text}
+        </span>
+        {d.interpolatedIntent && <div className="interp">{d.interpolatedIntent}</div>}
+        <div className="muted small">
+          Display model was too large to store in full ({d.fieldCount} fields). Use the live run
+          for the fields.
+        </div>
+        <WarningList warnings={d.warnings as DisplayModel["warnings"]} />
+      </div>
+    );
+  }
+  return (
+    <DecodeView
+      model={row.display as DisplayModel}
+      status={status}
+      hash={row.hash}
+      title="Stored by the follower"
+      subtitle={subtitle}
+    />
+  );
+}
+
+function DecodeView({
+  model,
+  status,
+  hash,
+  title,
+  subtitle,
+}: {
+  model: DisplayModel;
+  status: Status;
+  hash: string;
+  title: string;
+  subtitle?: string;
+}) {
   const meta = STATUS_META[status];
   return (
     <div className="decode">
       <div className="decodeHead">
-        <span className="tag" style={{ color: meta.color, borderColor: meta.color }}>
-          ● {meta.text}
+        <span className="decodeTitle">{title}</span>
+        <span className="muted small">
+          {subtitle && <>{subtitle} · </>}
+          <a className="mono" href={`https://etherscan.io/tx/${hash}`} target="_blank" rel="noreferrer">
+            {hash.slice(0, 10)}…{hash.slice(-6)}
+          </a>
         </span>
-        <a
-          className="mono small"
-          href={`https://etherscan.io/tx/${tx.hash}`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          {tx.hash.slice(0, 10)}…{tx.hash.slice(-8)}
-        </a>
       </div>
+      <span className="tag statusTag" style={{ color: meta.color, borderColor: meta.color }}>
+        ● {meta.text}
+      </span>
 
       {model.rawCalldataFallback ? (
         <div className="rawFallback">
@@ -188,9 +291,7 @@ function DecodeView({ outcome }: { outcome: DecodeOutcome }) {
                   ))}
             </div>
           )}
-          {model.interpolatedIntent && (
-            <div className="interp">{model.interpolatedIntent}</div>
-          )}
+          {model.interpolatedIntent && <div className="interp">{model.interpolatedIntent}</div>}
           <FieldList fields={model.fields} />
           {model.metadata?.contractName && (
             <div className="muted small">Contract: {model.metadata.contractName}</div>

@@ -66,7 +66,8 @@ export interface FeedItem {
   txCount: number;
 }
 
-function classify(model: DisplayModel): PracticalStatus {
+/** pass / partial / failed from a DisplayModel. Shared with the live follower. */
+export function classifyModel(model: DisplayModel): PracticalStatus {
   const rendered =
     model.intent !== undefined ||
     (Array.isArray(model.fields) && model.fields.length > 0);
@@ -74,8 +75,9 @@ function classify(model: DisplayModel): PracticalStatus {
   if (model.warnings && model.warnings.length > 0) return "partial";
   return "pass";
 }
+const classify = classifyModel;
 
-function intentToString(intent: DisplayModel["intent"]): string | undefined {
+export function intentToString(intent: DisplayModel["intent"]): string | undefined {
   if (intent === undefined) return undefined;
   if (typeof intent === "string") return intent;
   return Object.entries(intent)
