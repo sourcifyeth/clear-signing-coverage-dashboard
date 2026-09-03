@@ -11,6 +11,48 @@ import type { LiveTxDetail } from "./types.ts";
 import { fmtInt } from "./buckets.ts";
 import { canonicalSig, clip, CLIP_TEXT, contractName, contractUrl, iconFor, REGISTRY_REPO, SDK_REPO } from "./txMeta.ts";
 import { RawTxSection } from "./RawTxSection.tsx";
+import { fetchProxyInfo, type ProxyInfo } from "./abi.ts";
+
+/**
+ * Info banner when Sourcify says the target contract is a proxy: the proxy
+ * kind and the implementation(s) it points to.
+ */
+function ProxyBanner({ address }: { address: string }) {
+  const [info, setInfo] = useState<ProxyInfo | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setInfo(null);
+    void fetchProxyInfo(1, address).then((i) => !cancelled && setInfo(i));
+    return () => {
+      cancelled = true;
+    };
+  }, [address]);
+  if (!info?.isProxy) return null;
+  return (
+    <div className="infoBanner" role="note">
+      <span className="infoGlyph">ℹ️</span>
+      <span>
+        <b>Proxy contract</b>
+        {info.proxyType && <span className="muted"> · {info.proxyType}</span>}
+        {info.implementations.length > 0 && (
+          <>
+            {" "}
+            · implementation{info.implementations.length > 1 ? "s" : ""}{" "}
+            {info.implementations.map((impl, i) => (
+              <span key={impl.address}>
+                {i > 0 && ", "}
+                {impl.name && <b>{impl.name} </b>}
+                <a className="mono" href={contractUrl(1, impl.address)} target="_blank" rel="noreferrer" title={impl.address}>
+                  {impl.address.slice(0, 8)}…{impl.address.slice(-4)} ↗
+                </a>
+              </span>
+            ))}
+          </>
+        )}
+      </span>
+    </div>
+  );
+}
 
 /** The reduced record stored when a DisplayModel exceeded the size cap. */
 interface TruncatedDisplay {
@@ -157,6 +199,8 @@ function TxBody({ row }: { row: LiveTxDetail }) {
           </div>
         )}
       </div>
+
+      {row.toAddress && <ProxyBanner address={row.toAddress} />}
 
       <div className={`statusBanner ${toneOf(row)}`} role="status">
         {icon.cls === "eth" ? (

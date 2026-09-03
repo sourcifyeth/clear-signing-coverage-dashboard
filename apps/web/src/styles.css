@@ -1739,3 +1739,24 @@ footer {
 .segNote {
   font-size: 12px;
 }
+
+/* tx modal: proxy info banner (lighter than the status banner) */
+.infoBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #c7d2ee;
+  background: #eef2fb;
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.infoBanner .infoGlyph {
+  font-size: 15px;
+  line-height: 1.4;
+  flex: none;
+}

@@ -84,6 +84,42 @@ async function fromDescriptor(descriptorPath: string): Promise<AbiResult | null>
 }
 
 // ---------------------------------------------------------------------------
+// Proxy detection (for the modal's info banner)
+
+export interface ProxyInfo {
+  isProxy: boolean;
+  /** Sourcify's detector name, e.g. "EIP1967Proxy", "ZeppelinOSProxy", "GnosisSafeProxy" */
+  proxyType?: string;
+  implementations: { address: string; name?: string }[];
+}
+
+const proxyCache = new Map<string, Promise<ProxyInfo | null>>();
+
+/**
+ * What Sourcify knows about the contract being a proxy, or null when the
+ * contract is not verified there. Never throws; cached per address.
+ */
+export function fetchProxyInfo(chainId: number, address: string): Promise<ProxyInfo | null> {
+  const key = `${chainId}:${address.toLowerCase()}`;
+  const hit = proxyCache.get(key);
+  if (hit) return hit;
+  const p = (async () => {
+    try {
+      const res = await fetch(`${SOURCIFY_SERVER}/v2/contract/${chainId}/${address}?fields=proxyResolution`);
+      if (!res.ok) return null;
+      const body = (await res.json()) as { proxyResolution?: { isProxy?: boolean; proxyType?: string; implementations?: { address: string; name?: string }[] } };
+      const pr = body.proxyResolution;
+      if (!pr) return { isProxy: false, implementations: [] };
+      return { isProxy: pr.isProxy === true, proxyType: pr.proxyType, implementations: pr.implementations ?? [] };
+    } catch {
+      return null;
+    }
+  })();
+  proxyCache.set(key, p);
+  return p;
+}
+
+// ---------------------------------------------------------------------------
 // Selector -> text signatures (the fallback when no ABI matches)
 
 const FOURBYTE_LOOKUP = "https://api.4byte.sourcify.dev/signature-database/v1/lookup";
