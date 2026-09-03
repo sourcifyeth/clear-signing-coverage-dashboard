@@ -197,6 +197,7 @@ app.get("/api/live/recent", (req, res) => {
       limit: intQuery(req.query.limit, 100),
       bucket,
       sinceBlock: Number.isFinite(since) ? since : undefined,
+      signableOnly: req.query.signable === "1",
       ...excludeQuery(req.query.exclude),
     }),
   );

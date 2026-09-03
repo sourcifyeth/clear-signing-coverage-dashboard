@@ -43,11 +43,34 @@ const STRIP_BLOCKS = 60;
 /** min ms between summary refetches when the SSE summary does not apply (other window, or an exclusion is on) */
 const REFETCH_MIN_MS = 10_000;
 
-/** Is this row hidden by the toggles? Mirrors the API's `exclude=` semantics. */
-function hiddenByToggles(t: LiveTx, countEth: boolean, countToken: boolean): boolean {
+/** Does a wallet get a readable screen for this row? Mirrors the API's `signable=1` filter. */
+function isSignable(t: LiveTx): boolean {
+  if (t.bucket === "covered_theory") return t.status !== "failed";
+  return t.bucket === "eth_transfer" || t.bucket === "token_native";
+}
+
+/** Is this row hidden by the toggles (and the clear-signable filter)? Mirrors the API's `exclude=` / `signable=` semantics. */
+function hiddenByToggles(t: LiveTx, countEth: boolean, countToken: boolean, signableOnly = false): boolean {
   if (!countEth && t.bucket === "eth_transfer") return true;
   if (!countToken && STANDARD_TOKEN_SELECTORS.has(t.selector)) return true;
+  if (signableOnly && !isSignable(t)) return true;
   return false;
+}
+
+const SIGNABLE_KEY = "ccd.signableOnly";
+function loadSignableOnly(): boolean {
+  try {
+    return localStorage.getItem(SIGNABLE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function saveSignableOnly(v: boolean): void {
+  try {
+    localStorage.setItem(SIGNABLE_KEY, v ? "1" : "0");
+  } catch {
+    /* storage blocked */
+  }
 }
 
 export interface ToggleState {
@@ -89,6 +112,8 @@ export function LivePanel({
   const [latest, setLatest] = useState<LatestBlock | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [win, setWin] = useState<Win>("24h");
+  /** ticker filter: only rows a wallet can clear-sign */
+  const [signableOnly, setSignableOnly] = useState<boolean>(loadSignableOnly);
   useTopbarHeight();
   const [summary, setSummary] = useState<LiveSummary | null>(null);
   const [txs, setTxs] = useState<LiveTx[]>([]);
@@ -107,8 +132,8 @@ export function LivePanel({
   const winRef = useRef<Win>(win);
   const lastFetchRef = useRef(0);
   /** latest toggle state, readable from the SSE handler */
-  const togglesRef = useRef({ countEth: state.countEth, countToken: state.countToken });
-  togglesRef.current = { countEth: state.countEth, countToken: state.countToken };
+  const togglesRef = useRef({ countEth: state.countEth, countToken: state.countToken, signableOnly });
+  togglesRef.current = { countEth: state.countEth, countToken: state.countToken, signableOnly };
   /** hashes present when the list was last (re)loaded; rows not in here get the entry animation */
   const shownRef = useRef<Set<string> | null>(null);
 
@@ -126,7 +151,7 @@ export function LivePanel({
     if (r.ok) setSummary(await r.json());
   }
   async function fetchRecent() {
-    const r = await fetch(`/api/live/recent?limit=${TICKER_MAX}${exclude()}`);
+    const r = await fetch(`/api/live/recent?limit=${TICKER_MAX}${exclude()}${togglesRef.current.signableOnly ? "&signable=1" : ""}`);
     if (!r.ok) return;
     const rows = (await r.json()) as LiveTx[];
     shownRef.current = new Set(rows.map((t) => t.hash));
@@ -146,7 +171,7 @@ export function LivePanel({
         if (l.latest) {
           const [s, recent, bs] = await Promise.all([
             fetch(`/api/live/summary?window=${winRef.current}&limit=50${exclude()}`).then((r) => r.json()),
-            fetch(`/api/live/recent?limit=${TICKER_MAX}${exclude()}`).then((r) => r.json()),
+            fetch(`/api/live/recent?limit=${TICKER_MAX}${exclude()}${togglesRef.current.signableOnly ? "&signable=1" : ""}`).then((r) => r.json()),
             fetch(`/api/live/blocks?limit=${STRIP_BLOCKS}`).then((r) => r.json()),
           ]);
           setSummary(s);
@@ -186,6 +211,14 @@ export function LivePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.countEth, state.countToken]);
 
+  // Clear-signable filter: only the list changes, so only the list is refetched.
+  useEffect(() => {
+    saveSignableOnly(signableOnly);
+    if (!loaded || !latest) return;
+    withBusy(fetchRecent());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signableOnly]);
+
   // SSE stream. EventSource reconnects on its own. The event carries the plain
   // 24h summary; with an exclusion on, or another window, we refetch instead.
   // New rows go to the pending buffer, not straight into the list.
@@ -224,7 +257,7 @@ export function LivePanel({
   function showPending() {
     const order = new Map<string, number>();
     pending
-      .filter((t) => !hiddenByToggles(t, togglesRef.current.countEth, togglesRef.current.countToken))
+      .filter((t) => !hiddenByToggles(t, togglesRef.current.countEth, togglesRef.current.countToken, togglesRef.current.signableOnly))
       .forEach((t, i) => order.set(t.hash, i));
     revealRef.current = order;
     setTxs((prev) => mergeTxs(pending, prev));
@@ -242,8 +275,8 @@ export function LivePanel({
   const s = summary;
   const total = s?.totalTx ?? 0;
   const excluding = !state.countEth || !state.countToken;
-  const visibleTxs = txs.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken)).slice(0, TICKER_MAX);
-  const pendingShown = pending.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken));
+  const visibleTxs = txs.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken, signableOnly)).slice(0, TICKER_MAX);
+  const pendingShown = pending.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken, signableOnly));
   const pendingVisible = pendingShown.length;
   // "block N" or "blocks N to M": every block since the last render, not only
   // the ones whose rows survive the toggles or the buffer cap.
@@ -370,14 +403,19 @@ export function LivePanel({
               <BlockStrip blocks={blocks} countEth={state.countEth} countToken={state.countToken} onOpen={onOpenBlock} />
 
               <div className="tickerHead muted small">
-                Newest transactions — click one for details
-                {excluding && (
-                  <span>
-                    {" "}
-                    · {[!state.countEth && "ETH transfers", !state.countToken && "token transfers"].filter(Boolean).join(" and ")}{" "}
-                    hidden
-                  </span>
-                )}
+                <span>
+                  Newest transactions — click one for details
+                  {excluding && (
+                    <span>
+                      {" "}
+                      · {[!state.countEth && "ETH transfers", !state.countToken && "token transfers"].filter(Boolean).join(" and ")}{" "}
+                      hidden
+                    </span>
+                  )}
+                </span>
+                <label className="tickFilter">
+                  <input type="checkbox" checked={signableOnly} onChange={(e) => setSignableOnly(e.target.checked)} /> Clear-signable only
+                </label>
               </div>
               {pendingVisible > 0 && (
                 <button className="newBanner" onClick={showPending}>

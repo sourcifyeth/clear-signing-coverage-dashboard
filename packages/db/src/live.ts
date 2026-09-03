@@ -534,7 +534,7 @@ function toLiveTx(r: RawLiveTx): LiveTxOut {
 /** Most recent transactions, newest first. `sinceBlock` = strictly after that block. */
 export function recentTxs(
   db: Db,
-  opts: { limit?: number; bucket?: Bucket; sinceBlock?: number; chainId?: number } & ExcludeOptions = {},
+  opts: { limit?: number; bucket?: Bucket; sinceBlock?: number; chainId?: number; signableOnly?: boolean } & ExcludeOptions = {},
 ): LiveTxOut[] {
   const limit = Math.max(1, Math.min(opts.limit ?? 100, 1000));
   const chainId = opts.chainId ?? 1;
@@ -543,6 +543,12 @@ export function recentTxs(
   if (opts.bucket) {
     where.push("t.bucket = ?");
     params.push(opts.bucket);
+  }
+  // Clear-signable: a descriptor rendered it, or it is wallet-native (ETH /
+  // standard token). The exclude options below still drop the native kinds
+  // when they are toggled off.
+  if (opts.signableOnly) {
+    where.push("((t.bucket = 'covered_theory' AND COALESCE(t.status, '') <> 'failed') OR t.bucket IN ('eth_transfer', 'token_native'))");
   }
   if (opts.sinceBlock !== undefined) {
     where.push("t.block_number > ?");

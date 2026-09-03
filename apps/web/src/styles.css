@@ -2077,3 +2077,24 @@ footer {
 .unverifiedNote {
   margin-top: 6px;
 }
+
+/* ticker header: caption on the left, the clear-signable filter on the right */
+.tickerHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.tickFilter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--text-soft);
+}
+.tickFilter input {
+  accent-color: var(--blue);
+  margin: 0;
+}
