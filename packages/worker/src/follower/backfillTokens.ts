@@ -11,7 +11,7 @@
  */
 
 import { openDb, defaultDbPath, tokenCounts } from "@ccd/db";
-import { makeRpc, rpcFromEnv } from "./rpc.js";
+import { makeRpc, rpcFromEnv } from "@ccd/rpc";
 import { TokenCache } from "./externalData.js";
 
 const CHAIN_ID = 1;

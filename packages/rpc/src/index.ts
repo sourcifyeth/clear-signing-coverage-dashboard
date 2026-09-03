@@ -1,5 +1,5 @@
 /**
- * Minimal JSON-RPC client for the block follower. Node 20 global fetch, no
+ * Minimal JSON-RPC client shared by the block follower and the API. Node 20 global fetch, no
  * extra dependency. The endpoint URL may embed an API key, so it is never
  * logged; `describeRpc()` returns a safe label instead.
  */

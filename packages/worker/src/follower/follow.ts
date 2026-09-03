@@ -52,7 +52,7 @@ import { loadCoverageLookup, type CoverageLookup } from "../coverage/loadCoverag
 import { loadRegistryIndex } from "../coverage/registryIndex.js";
 import { bucketFor } from "../classify.js";
 import { classifyModel, intentToString } from "../practical.js";
-import { makeRpc, rpcFromEnv, type RpcBlock, type RpcTx } from "./rpc.js";
+import { makeRpc, rpcFromEnv, type RpcBlock, type RpcTx } from "@ccd/rpc";
 import { SignatureCache } from "./signatures.js";
 import { TokenCache, createExternalDataProvider } from "./externalData.js";
 

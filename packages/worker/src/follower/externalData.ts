@@ -18,7 +18,7 @@
 
 import type { ExternalDataProvider, TokenResult } from "@ethereum-sourcify/clear-signing";
 import { allTokens, blockTimeIso, upsertTokens, type Db, type TokenIn, type TokenRow } from "@ccd/db";
-import type { Rpc } from "./rpc.js";
+import type { Rpc } from "@ccd/rpc";
 
 const CALL_TIMEOUT_MS = 8000;
 const NEGATIVE_TTL_MS = 7 * 24 * 3600_000;

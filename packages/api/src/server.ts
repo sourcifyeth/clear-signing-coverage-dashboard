@@ -25,6 +25,8 @@
  *   GET /api/live/recent?limit=100&bucket=&since=
  *                                   -> newest tx rows (hash + labels + intent, no contents)
  *   GET /api/live/tx/:hash          -> one stored row incl. the library's DisplayModel
+ *   GET /api/live/tx/:hash/raw      -> the transaction as the node has it (from, to,
+ *                                      value, calldata, nonce, gas, type), via RPC, cached
  *   GET /api/live/stream            -> SSE; `block` events as new blocks land
  *
  * Env: DB_PATH (default <repo>/out/coverage.sqlite), PORT (default 8787),
@@ -55,6 +57,7 @@ import {
   registryCommit,
   type Bucket,
 } from "@ccd/db";
+import { makeRpc, rpcFromEnv } from "@ccd/rpc";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
@@ -63,12 +66,9 @@ const PORT = Number(process.env.PORT ?? 8787);
 const REGISTRY_PATH = path.resolve(
   process.env.REGISTRY_PATH ?? path.join(REPO_ROOT, "../clear-signing-erc7730-registry"),
 );
-// Same resolution as the follower. The URL may embed a key: never log it.
-const RPC_URL =
-  process.env.RPC_URL ??
-  (process.env.DRPC_API_KEY
-    ? `https://lb.drpc.org/ethereum/${process.env.DRPC_API_KEY}`
-    : "https://ethereum-rpc.publicnode.com");
+// Same endpoint resolution as the follower (RPC_URL, else DRPC_API_KEY, else a
+// public node). The URL may embed a key: only `rpc.label` is ever logged.
+const rpc = makeRpc(rpcFromEnv(), { timeoutMs: 8000 });
 
 const WINDOWS: Record<string, number> = { "1h": 1, "24h": 24, "7d": 168 };
 const BUCKET_NAMES = new Set<string>(["contract_creation", "eth_transfer", "covered_theory", "token_native", "not_covered"]);
@@ -279,27 +279,105 @@ app.get("/api/descriptor", (req, res) => {
   res.type("application/json").send(fs.readFileSync(abs, "utf8"));
 });
 
-// Fetch a transaction by hash via RPC (server-side, so no CORS / key exposure).
-// Returns only what the decoder needs; nothing is stored.
+// --- raw transactions on demand ---
+
+/** What eth_getTransactionByHash returns; quantities are hex strings. */
+interface RpcRawTx {
+  hash: string;
+  from: string;
+  to: string | null;
+  input: string;
+  value: string;
+  nonce: string;
+  gas: string;
+  type?: string;
+  blockNumber: string | null;
+}
+
+/** The shape the transaction modal consumes: decimal strings for big quantities. */
+interface RawTxOut {
+  hash: string;
+  from: string;
+  to: string | null;
+  /** wei, decimal string */
+  value: string;
+  input: string;
+  nonce: number;
+  /** gas limit, decimal string */
+  gas: string;
+  /** EIP-2718 type, e.g. 0, 1, 2, 3, 4 */
+  type: number;
+  blockNumber: number | null;
+}
+
+/**
+ * Small LRU for raw transactions: a modal reopened for the same hash must not
+ * cost another RPC round trip. Map keeps insertion order, so the oldest entry
+ * is the first key.
+ */
+const RAW_TX_CACHE_MAX = 500;
+const rawTxCache = new Map<string, RawTxOut>();
+function rawTxRemember(tx: RawTxOut): void {
+  rawTxCache.delete(tx.hash);
+  rawTxCache.set(tx.hash, tx);
+  if (rawTxCache.size > RAW_TX_CACHE_MAX) rawTxCache.delete(rawTxCache.keys().next().value as string);
+}
+
+function hexToDecimalString(hex: string | undefined | null): string {
+  try {
+    return BigInt(hex ?? "0x0").toString();
+  } catch {
+    return "0";
+  }
+}
+
+/** Fetch one transaction over RPC (cached). Null when the node has no such hash. */
+async function fetchRawTx(hash: string): Promise<RawTxOut | null> {
+  const key = hash.toLowerCase();
+  const hit = rawTxCache.get(key);
+  if (hit) {
+    rawTxRemember(hit); // refresh recency
+    return hit;
+  }
+  const tx = await rpc.call<RpcRawTx | null>("eth_getTransactionByHash", [key], { timeoutMs: 8000 });
+  if (!tx) return null;
+  const out: RawTxOut = {
+    hash: key,
+    from: tx.from,
+    to: tx.to ?? null,
+    value: hexToDecimalString(tx.value),
+    input: tx.input,
+    nonce: Number(tx.nonce),
+    gas: hexToDecimalString(tx.gas),
+    type: tx.type === undefined ? 0 : Number(tx.type),
+    blockNumber: tx.blockNumber ? Number(tx.blockNumber) : null,
+  };
+  // Only cache mined transactions: a pending one changes once it lands.
+  if (out.blockNumber !== null) rawTxRemember(out);
+  return out;
+}
+
+// The transaction as the node has it (from, to, value, calldata, ...), fetched
+// on demand for the transaction modal. The follower never stores calldata.
+app.get("/api/live/tx/:hash/raw", async (req, res) => {
+  const hash = String(req.params.hash).trim();
+  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) return res.status(400).json({ error: "invalid tx hash" });
+  try {
+    const tx = await fetchRawTx(hash);
+    if (!tx) return res.status(404).json({ error: "transaction not found on the node" });
+    res.set("Cache-Control", "public, max-age=3600");
+    res.json(tx);
+  } catch (e) {
+    res.status(502).json({ error: `RPC request failed: ${(e as Error).message}` });
+  }
+});
+
+// Older alias used by the browser decoder: same data, hex quantities.
 app.get("/api/tx/:hash", async (req, res) => {
   const hash = String(req.params.hash).trim();
-  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
-    return res.status(400).json({ error: "invalid tx hash" });
-  }
+  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) return res.status(400).json({ error: "invalid tx hash" });
   try {
-    const rpcRes = await fetch(RPC_URL, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "eth_getTransactionByHash",
-        params: [hash],
-      }),
-    });
-    const body = (await rpcRes.json()) as { result?: any; error?: any };
-    if (body.error) return res.status(502).json({ error: `RPC: ${body.error.message}` });
-    const tx = body.result;
+    const tx = await fetchRawTx(hash);
     if (!tx) return res.status(404).json({ error: "transaction not found" });
     res.json({
       chainId: 1,
@@ -307,8 +385,8 @@ app.get("/api/tx/:hash", async (req, res) => {
       to: tx.to, // null for contract creation
       from: tx.from,
       input: tx.input,
-      value: tx.value, // hex quantity
-      blockNumber: tx.blockNumber,
+      value: `0x${BigInt(tx.value).toString(16)}`,
+      blockNumber: tx.blockNumber === null ? null : `0x${tx.blockNumber.toString(16)}`,
     });
   } catch (e) {
     res.status(502).json({ error: `RPC request failed: ${(e as Error).message}` });

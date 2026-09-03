@@ -1,0 +1,13 @@
+{
+  "name": "@ccd/rpc",
+  "version": "0.0.0",
+  "description": "Minimal JSON-RPC client shared by the block follower and the API. Node fetch, no dependencies; the endpoint URL (which may embed a key) is never logged.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}
