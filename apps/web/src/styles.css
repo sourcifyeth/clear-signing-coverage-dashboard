@@ -2008,3 +2008,18 @@ footer {
   pointer-events: none;
   z-index: 5;
 }
+
+/* plain text button: no border or background, just a muted word that reacts on hover */
+.plainBtn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-family: var(--sans);
+  font-size: 12px;
+  cursor: pointer;
+}
+.plainBtn:hover {
+  color: var(--blue);
+}

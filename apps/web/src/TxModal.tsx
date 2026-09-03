@@ -24,7 +24,7 @@ function Expandable({ text, max }: { text: string; max: number }) {
   return (
     <>
       {open ? text : `${text.slice(0, max)}…`}{" "}
-      <button type="button" className="chipBtn" onClick={() => setOpen(!open)}>
+      <button type="button" className="plainBtn" onClick={() => setOpen(!open)}>
         {open ? "Show less" : "Show all"}
       </button>
     </>
