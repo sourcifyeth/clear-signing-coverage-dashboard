@@ -37,14 +37,14 @@ function VerifiedBadge({ address }: { address: string }) {
         href={contractUrl(1, address)}
         target="_blank"
         rel="noreferrer"
-        data-tip={`Verified on Sourcify (${v.match === "exact_match" ? "exact match" : "match"}) · open in the repository`}
+        data-tip={`${v.match === "exact_match" ? "Exact match" : "Match"} on Sourcify · open in the repository`}
       >
-        <img src="/sourcify.png" alt="Sourcify" />
+        <img src="/sourcify.png" alt="" /> Verified ↗
       </a>
     );
   return (
-    <span className="verifyBadge no" data-tip="Not verified on Sourcify">
-      ⊘
+    <span className="verifyBadge no" data-tip="No verified source on Sourcify for this address">
+      ⊘ Not verified
     </span>
   );
 }

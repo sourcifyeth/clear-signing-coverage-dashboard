@@ -1911,3 +1911,38 @@ footer {
   pointer-events: none;
   z-index: 5;
 }
+
+/* verification badge as a small label: icon + text in a pill */
+.verifyBadge {
+  width: auto;
+  height: auto;
+  gap: 5px;
+  padding: 1px 8px 1px 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: #fff;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.6;
+  vertical-align: 1px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.verifyBadge.yes {
+  color: var(--blue);
+  border-color: var(--blue-200);
+  background: var(--blue-100);
+}
+.verifyBadge.yes:hover {
+  border-color: var(--blue);
+  text-decoration: none;
+}
+.verifyBadge.yes img {
+  width: 13px;
+  height: 13px;
+}
+.verifyBadge.no {
+  color: var(--muted);
+  font-size: 11px;
+  border-style: dashed;
+}
