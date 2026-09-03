@@ -1,16 +1,16 @@
 /**
- * Window ranking: every contract (or every function) called in the window,
- * ordered by transaction count, with its coverage state. Reading the table top
- * to bottom answers two questions at once: which contracts already help, and
- * which ones to add next.
+ * Window ranking: every contract called in the window, ordered by transaction
+ * count, with its coverage state. Reading the table top to bottom answers two
+ * questions at once: which contracts already help, and which ones to add next.
+ * (The API also serves a per-function ranking, `by=function`; the page does
+ * not show it.)
  */
 
 import { useEffect, useRef, useState } from "react";
-import type { LiveRanking, RankedContractRow, RankedFunctionRow, RankedSelector } from "./types.ts";
+import type { LiveRanking, RankedContractRow, RankedSelector } from "./types.ts";
 import { fmtInt, fmtPct, short } from "./buckets.ts";
 import { canonicalSig, contractName, fnShort, REGISTRY_REPO } from "./txMeta.ts";
 
-type By = "contract" | "function";
 const REFETCH_MIN_MS = 30_000;
 
 export function RankingPanel({
@@ -29,7 +29,6 @@ export function RankingPanel({
   /** +1 when a user-triggered load starts, -1 when it ends (drives the page overlay) */
   onBusy?: (delta: 1 | -1) => void;
 }) {
-  const [by, setBy] = useState<By>("contract");
   const [data, setData] = useState<LiveRanking | null>(null);
   const [loading, setLoading] = useState(false);
   const lastFetch = useRef(0);
@@ -40,7 +39,7 @@ export function RankingPanel({
     setLoading(true);
     if (userTriggered) onBusy?.(1);
     try {
-      const r = await fetch(`/api/live/ranking?window=${win}&by=${by}&limit=100${exclude}`);
+      const r = await fetch(`/api/live/ranking?window=${win}&by=contract&limit=100${exclude}`);
       if (r.ok) setData(await r.json());
     } finally {
       setLoading(false);
@@ -48,14 +47,14 @@ export function RankingPanel({
     }
   }
 
-  // A change of window, tab, or toggles is the user's doing: show the overlay.
+  // A change of window or toggles is the user's doing: show the overlay.
   // The very first load is not.
   useEffect(() => {
     const user = !firstLoad.current;
     firstLoad.current = false;
     void load(user);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [win, by, exclude]);
+  }, [win, exclude]);
 
   useEffect(() => {
     if (Date.now() - lastFetch.current > REFETCH_MIN_MS) void load(false);
@@ -65,21 +64,11 @@ export function RankingPanel({
   return (
     <section className="card">
       <div className="rankHead">
-        <h3>
-          {by === "contract" ? "Contracts" : "Functions"} by transaction count · last {win}
-        </h3>
-        <div className="rankTabs">
-          <button className={`chip ${by === "contract" ? "on" : ""}`} onClick={() => setBy("contract")}>
-            Contracts
-          </button>
-          <button className={`chip ${by === "function" ? "on" : ""}`} onClick={() => setBy("function")}>
-            Functions
-          </button>
-        </div>
+        <h3>Contracts by transaction count · last {win}</h3>
       </div>
       <p className="muted small">
-        Every {by === "contract" ? "contract" : "function"} called in the window, most transactions first.
-        ✅ has an ERC-7730 descriptor for the call, ❌ does not.
+        Every contract called in the window, most transactions first. ✅ has an ERC-7730 descriptor
+        for the call, ❌ does not.
         {excluding && " ETH and standard token transfers are left out, as set above."}
         {data && (
           <>
@@ -91,10 +80,8 @@ export function RankingPanel({
 
       {!data ? (
         <div className="muted small">{loading ? "Loading…" : "No data yet."}</div>
-      ) : by === "contract" ? (
-        <ContractTable rows={data.contracts ?? []} />
       ) : (
-        <FunctionTable rows={data.functions ?? []} />
+        <ContractTable rows={data.contracts ?? []} />
       )}
     </section>
   );
@@ -195,55 +182,6 @@ function ContractTable({ rows }: { rows: RankedContractRow[] }) {
                   )}
                 </div>
               </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function FunctionTable({ rows }: { rows: RankedFunctionRow[] }) {
-  if (rows.length === 0) return <div className="muted small">No contract calls in this window.</div>;
-  return (
-    <div className="tblWrap">
-      <table className="tbl rankTbl">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Function</th>
-            <th>Contract</th>
-            <th>Coverage</th>
-            <th className="r">Txs</th>
-            <th className="r">Share</th>
-            <th className="r">Cum.</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((f, i) => (
-            <tr key={`${f.toAddress}-${f.selector}`} className={f.covered ? "rowOk" : ""}>
-              <td className="muted">{i + 1}</td>
-              <td className="mono">
-                <a href={`https://4byte.sourcify.dev/?q=${f.selector}`} target="_blank" rel="noreferrer">
-                  {f.functionSig ? canonicalSig(f.functionSig) : f.selector}
-                </a>
-                {f.functionSig && <span className="fnSel"> {f.selector}</span>}
-              </td>
-              <td>
-                <ContractCell toAddress={f.toAddress} entity={f.entity} />
-              </td>
-              <td>
-                {f.covered ? (
-                  <span className="badge ok">✅ covered</span>
-                ) : f.bucket === "token_native" ? (
-                  <span className="badge native">💸 wallet-native</span>
-                ) : (
-                  <span className="badge no">❌ not covered</span>
-                )}
-              </td>
-              <td className="r">{fmtInt(f.txCount)}</td>
-              <td className="r">{fmtPct(f.sharePct)}</td>
-              <td className="r muted">{fmtPct(f.cumulativePct)}</td>
             </tr>
           ))}
         </tbody>
