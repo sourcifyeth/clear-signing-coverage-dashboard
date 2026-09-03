@@ -52,7 +52,7 @@ export function BlockStrip({
           <span className="stripNum" style={{ color: COLOR.okText }}>
             {fmtInt(lastSplit.signable)}
           </span>
-          <span className="muted"> of </span>
+          <span className="muted"> / </span>
           <span className="stripNum muted">{fmtInt(lastSplit.counted)}</span>
           <span className="muted">
             {" "}

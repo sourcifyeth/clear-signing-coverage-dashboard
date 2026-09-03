@@ -127,7 +127,7 @@ function Body({
       <div className="blockStats">
         <div className="blockStat">
           <div className="statVal" style={{ color: COLOR.okText }}>
-            {fmtInt(split.signable)} <span className="muted">of</span> {fmtInt(split.counted)}
+            {fmtInt(split.signable)} <span className="muted">/ {fmtInt(split.counted)}</span>
           </div>
           <div className="statLbl muted">{excluding ? "counted calls" : "transactions"} clear-signable · {fmtPct(split.pct)}</div>
         </div>
