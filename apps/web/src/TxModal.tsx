@@ -9,7 +9,7 @@ import { isFieldGroup } from "@ethereum-sourcify/clear-signing";
 import type { DisplayModel, DisplayField } from "@ethereum-sourcify/clear-signing";
 import type { LiveTxDetail } from "./types.ts";
 import { fmtInt } from "./buckets.ts";
-import { canonicalSig, contractName, iconFor } from "./txMeta.ts";
+import { canonicalSig, contractName, iconFor, REGISTRY_REPO } from "./txMeta.ts";
 
 /** The reduced record stored when a DisplayModel exceeded the size cap. */
 interface TruncatedDisplay {
@@ -113,6 +113,16 @@ function TxBody({ row }: { row: LiveTxDetail }) {
               {sig ?? <span className="muted">unknown signature</span>}{" "}
               <a className="fnSel" href={`https://4byte.sourcify.dev/?q=${row.selector}`} target="_blank" rel="noreferrer">
                 {row.selector}
+              </a>
+            </span>
+          </div>
+        )}
+        {row.descriptorPath && (
+          <div className="metaRow">
+            <span className="muted">Descriptor</span>
+            <span>
+              <a className="mono" href={`${REGISTRY_REPO}/blob/master/${row.descriptorPath}`} target="_blank" rel="noreferrer">
+                {row.descriptorPath} ↗
               </a>
             </span>
           </div>

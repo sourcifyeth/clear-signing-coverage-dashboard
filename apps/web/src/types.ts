@@ -120,6 +120,8 @@ export interface LiveTx {
   displayText: string | null;
   entity: string | null;
   functionSig: string | null;
+  /** registry path of the covering descriptor, e.g. "registry/lido/calldata-wstETH.json" */
+  descriptorPath: string | null;
 }
 
 /** /api/live/tx/:hash — a stored row plus the library's DisplayModel. */

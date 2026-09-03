@@ -359,6 +359,8 @@ export interface LiveTxOut {
   displayText: string | null;
   entity: string | null;
   functionSig: string | null;
+  /** registry path of the descriptor that covers this call, e.g. "registry/lido/calldata-wstETH.json" */
+  descriptorPath: string | null;
 }
 
 export interface LiveTxDetailOut extends LiveTxOut {
@@ -381,12 +383,13 @@ interface RawLiveTx {
   display_json: string | null;
   entity: string | null;
   function_sig: string | null;
+  descriptor_path: string | null;
   sig_name: string | null;
 }
 
 const LIVE_TX_SELECT = `
   SELECT t.tx_hash, t.block_number, t.block_hash, t.block_time, t.to_address, t.selector, t.bucket, t.status,
-         t.warnings_json, t.intent, t.display_json, c.entity, c.function_sig, s.name AS sig_name
+         t.warnings_json, t.intent, t.display_json, c.entity, c.function_sig, c.descriptor_path, s.name AS sig_name
   FROM tx_index t
   LEFT JOIN coverage c ON c.chain_id = ? AND c.address = t.to_address AND c.selector = t.selector
   LEFT JOIN signatures s ON s.selector = t.selector`;
@@ -479,6 +482,7 @@ function toLiveTx(r: RawLiveTx): LiveTxOut {
     entity: r.entity,
     // registry signature (has parameter names) first, else the 4byte lookup
     functionSig: r.function_sig ?? r.sig_name,
+    descriptorPath: r.descriptor_path,
   };
 }
 
