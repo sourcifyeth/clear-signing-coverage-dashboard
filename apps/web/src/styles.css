@@ -1272,3 +1272,40 @@ footer {
 .stripCol {
   transition: flex-basis 0.3s ease;
 }
+
+/* ticker header row and the block-modal variant with the position column */
+.tickHeader {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: default;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.tickHeader:hover {
+  background: var(--bg);
+}
+.tickRow.withIdx {
+  /* # | icon | function | contract | clear-signed text | hash */
+  grid-template-columns: 52px 26px minmax(180px, 250px) 150px 1fr 78px;
+}
+.tickIdx {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.tickGroupLabel {
+  padding: 8px 12px 4px;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+@media (max-width: 760px) {
+  .tickRow.withIdx {
+    grid-template-columns: 52px 26px 1fr 1fr;
+  }
+}

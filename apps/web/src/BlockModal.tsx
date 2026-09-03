@@ -9,11 +9,25 @@ import type { BlockDetail, Buckets, LiveTx } from "./types.ts";
 import { COLOR, STANDARD_TOKEN_SELECTORS, fmtInt, fmtPct } from "./buckets.ts";
 import { BucketBar } from "./BucketBar.tsx";
 import { splitBlock } from "./BlockStrip.tsx";
-import { TickerRow } from "./LivePanel.tsx";
+import { TickerHeader, TickerRow } from "./LivePanel.tsx";
 
 function hidden(t: LiveTx, countEth: boolean, countToken: boolean): boolean {
   if (!countEth && t.bucket === "eth_transfer") return true;
   if (!countToken && STANDARD_TOKEN_SELECTORS.has(t.selector)) return true;
+  return false;
+}
+
+/** A row with its position in the block (the follower stores rows in block order). */
+type IndexedTx = { tx: LiveTx; index: number };
+
+/**
+ * Does a wallet get a readable screen for this transaction? Covered calls that
+ * rendered, plus the wallet-native kinds (only when they are included).
+ */
+function signable(t: LiveTx, countEth: boolean, countToken: boolean): boolean {
+  if (t.bucket === "covered_theory") return t.status !== "failed";
+  if (t.bucket === "eth_transfer") return countEth;
+  if (t.bucket === "token_native") return countToken;
   return false;
 }
 
@@ -52,9 +66,15 @@ export function BlockModal({
   }, [onClose]);
 
   const excluding = !countEth || !countToken;
-  const visible = useMemo(() => {
+  // Rows carry their block position, then the toggles filter, then
+  // clear-signable rows come first (each group in block order).
+  const visible = useMemo<IndexedTx[]>(() => {
     if (!detail) return [];
-    return showAll || !excluding ? detail.txs : detail.txs.filter((t) => !hidden(t, countEth, countToken));
+    const all = detail.txs.map((tx, index) => ({ tx, index }));
+    const kept = showAll || !excluding ? all : all.filter((r) => !hidden(r.tx, countEth, countToken));
+    const yes = kept.filter((r) => signable(r.tx, countEth, countToken));
+    const no = kept.filter((r) => !signable(r.tx, countEth, countToken));
+    return yes.concat(no);
   }, [detail, showAll, excluding, countEth, countToken]);
 
   return (
@@ -90,7 +110,7 @@ function Body({
   detail: BlockDetail;
   countEth: boolean;
   countToken: boolean;
-  visible: LiveTx[];
+  visible: IndexedTx[];
   showAll: boolean;
   setShowAll: (v: boolean) => void;
   onInspect: (hash: string) => void;
@@ -169,9 +189,23 @@ function Body({
         )}
       </div>
       <div className="ticker tall">
-        {visible.map((t) => (
-          <TickerRow key={t.hash} tx={t} fresh={false} active={false} onClick={() => onInspect(t.hash)} />
-        ))}
+        <TickerHeader withIndex />
+        {visible.map((r, i) => {
+          const isSignable = signable(r.tx, countEth, countToken);
+          const firstOfGroup = i === 0 || signable(visible[i - 1].tx, countEth, countToken) !== isSignable;
+          return (
+            <div key={r.tx.hash} className="tickGroup">
+              {firstOfGroup && (
+                <div className="tickGroupLabel muted small">
+                  {isSignable
+                    ? `Clear-signable · ${visible.filter((v) => signable(v.tx, countEth, countToken)).length}`
+                    : `Not clear-signable · ${visible.filter((v) => !signable(v.tx, countEth, countToken)).length}`}
+                </div>
+              )}
+              <TickerRow tx={r.tx} index={r.index} fresh={false} active={false} onClick={() => onInspect(r.tx.hash)} />
+            </div>
+          );
+        })}
         {visible.length === 0 && <div className="muted small" style={{ padding: 12 }}>Nothing to show with the current toggles.</div>}
       </div>
     </>

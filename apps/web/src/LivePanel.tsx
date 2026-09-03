@@ -344,6 +344,7 @@ export function LivePanel({
                 </button>
               )}
               <div className="ticker">
+                <TickerHeader />
                 {visibleTxs.map((t) => (
                   <TickerRow
                     key={t.hash}
@@ -385,11 +386,27 @@ function TickerIcon({ tx: t }: { tx: LiveTx }) {
   );
 }
 
+/** Column headers matching TickerRow's grid. `withIndex` = the block-modal variant (#N first, no block column). */
+export function TickerHeader({ withIndex = false }: { withIndex?: boolean }) {
+  return (
+    <div className={`tickRow tickHeader ${withIndex ? "withIdx" : ""}`} aria-hidden="true">
+      {withIndex && <span>#</span>}
+      <span />
+      <span>Function</span>
+      {!withIndex && <span>Block</span>}
+      <span>Contract</span>
+      <span>Clear-signed as</span>
+      <span className="tickHash">Tx</span>
+    </div>
+  );
+}
+
 export function TickerRow({
   tx: t,
   fresh,
   delayMs = 0,
   active,
+  index,
   onClick,
 }: {
   tx: LiveTx;
@@ -397,12 +414,15 @@ export function TickerRow({
   /** stagger for rows revealed together: each starts its entry animation this much later */
   delayMs?: number;
   active: boolean;
+  /** position of the transaction in its block; when given it is shown first and the block column is dropped */
+  index?: number;
   onClick: () => void;
 }) {
   const creation = t.bucket === "contract_creation";
   const signed = t.bucket === "covered_theory" && t.status !== "failed";
   const dim = t.bucket === "not_covered" || creation || (t.bucket === "covered_theory" && t.status === "failed");
-  const cls = ["tickRow", active && "active", fresh && "fresh", signed && "signed", dim && "dim"]
+  const withIdx = index !== undefined;
+  const cls = ["tickRow", active && "active", fresh && "fresh", signed && "signed", dim && "dim", withIdx && "withIdx"]
     .filter(Boolean)
     .join(" ");
   const name = fnName(t);
@@ -414,6 +434,7 @@ export function TickerRow({
       role="button"
       tabIndex={0}
     >
+      {withIdx && <span className="tickIdx mono muted">#{index}</span>}
       <TickerIcon tx={t} />
       <span className="tickFn mono" title={t.functionSig ? `${t.functionSig}  ${t.selector}` : t.selector}>
         {t.bucket === "eth_transfer" || creation ? (
@@ -430,7 +451,7 @@ export function TickerRow({
           </a>
         )}
       </span>
-      <span className="tickBlock mono muted">{fmtInt(t.blockNumber)}</span>
+      {!withIdx && <span className="tickBlock mono muted">{fmtInt(t.blockNumber)}</span>}
       <span className="tickWho">{who(t)}</span>
       <span className={`tickIntent ${signed ? "" : "muted"}`} title={t.displayText ?? t.intent ?? undefined}>
         {signed ? t.displayText ?? t.intent ?? "" : t.intent ?? (t.warnings[0] ? t.warnings[0].code : "")}
