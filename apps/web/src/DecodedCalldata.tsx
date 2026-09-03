@@ -144,6 +144,8 @@ function LongScalar({ text }: { text: string }) {
 
 function Value({ value, param }: { value: unknown; param: ParamLike }) {
   const members = membersOf(value, param);
+  // Dynamic `bytes` go in a small scroll box, like the calldata; other scalars collapse past a length.
+  if (!members && param.type === "bytes") return <div className="bytesBox mono">{scalarToString(value)}</div>;
   if (!members) return <LongScalar text={scalarToString(value)} />;
   if (members.length === 0) return <span className="muted">[]</span>;
   return (
