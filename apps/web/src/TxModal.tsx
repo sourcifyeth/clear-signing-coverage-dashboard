@@ -80,11 +80,13 @@ function TxBody({ row }: { row: LiveTxDetail }) {
       <div className="modalHead">
         <span className={`tickIcon big ${icon.cls ?? ""}`}>{icon.glyph}</span>
         <div>
-          <div className="modalTitle">{icon.tip}</div>
+          <div className="modalTitle">
+            Transaction <span className="mono">{row.hash.slice(0, 10)}…{row.hash.slice(-6)}</span>
+          </div>
           <div className="muted small">
-            block {fmtInt(row.blockNumber)} · {row.blockTimeIso.replace("T", " ").replace(".000Z", " UTC")} ·{" "}
-            <a className="mono" href={`https://etherscan.io/tx/${row.hash}`} target="_blank" rel="noreferrer">
-              {row.hash.slice(0, 10)}…{row.hash.slice(-6)} ↗
+            {icon.tip} · block {fmtInt(row.blockNumber)} · {row.blockTimeIso.replace("T", " ").replace(".000Z", " UTC")} ·{" "}
+            <a href={`https://etherscan.io/tx/${row.hash}`} target="_blank" rel="noreferrer" title={row.hash}>
+              Explorer ↗
             </a>
           </div>
         </div>
