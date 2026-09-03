@@ -98,3 +98,16 @@ export function iconFor(t: Pick<LiveTx, "bucket" | "status">): TxIcon {
 }
 
 export const REGISTRY_REPO = "https://github.com/LedgerHQ/clear-signing-erc7730-registry";
+
+/** Character limits for table cells: short labels (names, signatures) and running text (clear-signed text, field values). */
+export const CLIP_NAME = 48;
+export const CLIP_TEXT = 120;
+
+/**
+ * Cut a cell's text past `max` characters and end it with an ellipsis. Callers
+ * put the full text in the cell's `title` so hover still shows all of it.
+ */
+export function clip(text: string, max: number = CLIP_NAME): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trimEnd()}…`;
+}

@@ -401,6 +401,9 @@ button {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   vertical-align: top;
+  /* cells always wrap, even inside strings with no whitespace (hashes, signatures) */
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .tbl th {
   color: var(--muted);
@@ -408,10 +411,13 @@ button {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  /* short labels and numbers keep their width; only the text columns wrap */
+  white-space: nowrap;
 }
 .tbl .r {
   text-align: right;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .tbl a {
   color: var(--blue);
@@ -501,7 +507,8 @@ button {
 .fieldValue {
   font-size: 13px;
   text-align: right;
-  word-break: break-all;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   max-width: 60%;
 }
 .rawFallback {
@@ -512,7 +519,8 @@ button {
 }
 .raw {
   color: var(--muted);
-  word-break: break-all;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .warnings {
   margin-top: 12px;
@@ -628,6 +636,12 @@ button {
   border-bottom: 1px solid var(--border);
   font-size: 13px;
   cursor: pointer;
+  /* cells wrap inside their column instead of overflowing it */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.tickRow > * {
+  min-width: 0;
 }
 .tickRow:last-child {
   border-bottom: none;
@@ -775,15 +789,9 @@ button {
 }
 .tickWho {
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .tickFn {
   font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .tickFn a {
   color: var(--blue);
@@ -800,12 +808,11 @@ button {
   color: var(--faint);
   font-size: 11px;
   font-family: var(--mono);
+  /* a selector is 10 characters; move it to the next line whole rather than split it */
+  white-space: nowrap;
 }
 .tickIntent {
   font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .tickHash {
   font-size: 12px;
@@ -969,7 +976,9 @@ footer {
   box-shadow: inset 3px 0 0 var(--amber);
 }
 .rankTbl .contractCell {
-  white-space: nowrap;
+  display: inline-flex;
+  flex-wrap: wrap;
+  column-gap: 6px;
 }
 .rankTbl td:nth-child(2) {
   min-width: 150px;
@@ -1018,7 +1027,9 @@ footer {
   font-size: 12px;
   color: var(--text);
   text-decoration: none;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
   background: #fff;
 }
 .selChip .mark {
@@ -1135,7 +1146,11 @@ footer {
   grid-template-columns: 80px 1fr;
   gap: 10px;
   align-items: baseline;
-  word-break: break-all;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.metaRow > * {
+  min-width: 0;
 }
 .metaRow a {
   color: var(--blue);

@@ -9,7 +9,7 @@ import { isFieldGroup } from "@ethereum-sourcify/clear-signing";
 import type { DisplayModel, DisplayField } from "@ethereum-sourcify/clear-signing";
 import type { LiveTxDetail } from "./types.ts";
 import { fmtInt } from "./buckets.ts";
-import { canonicalSig, contractName, iconFor, REGISTRY_REPO } from "./txMeta.ts";
+import { canonicalSig, clip, CLIP_TEXT, contractName, iconFor, REGISTRY_REPO } from "./txMeta.ts";
 
 /** The reduced record stored when a DisplayModel exceeded the size cap. */
 interface TruncatedDisplay {
@@ -96,7 +96,7 @@ function TxBody({ row }: { row: LiveTxDetail }) {
           <span>
             {row.toAddress ? (
               <>
-                <b>{contractName(row.toAddress, row.entity)}</b>{" "}
+                <b title={contractName(row.toAddress, row.entity)}>{clip(contractName(row.toAddress, row.entity))}</b>{" "}
                 <a className="mono muted" href={`https://etherscan.io/address/${row.toAddress}`} target="_blank" rel="noreferrer">
                   {row.toAddress}
                 </a>
@@ -109,8 +109,8 @@ function TxBody({ row }: { row: LiveTxDetail }) {
         {row.bucket !== "eth_transfer" && row.bucket !== "contract_creation" && (
           <div className="metaRow">
             <span className="muted">Function</span>
-            <span className="mono">
-              {sig ?? <span className="muted">unknown signature</span>}{" "}
+            <span className="mono" title={sig ?? undefined}>
+              {sig ? clip(sig, CLIP_TEXT) : <span className="muted">unknown signature</span>}{" "}
               <a className="fnSel" href={`https://4byte.sourcify.dev/?q=${row.selector}`} target="_blank" rel="noreferrer">
                 {row.selector}
               </a>
@@ -266,7 +266,9 @@ function FieldRow({ field }: { field: DisplayField }) {
     <div className={`fieldRow ${field.warning ? "warned" : ""}`}>
       <div className="fieldMain">
         <div className="fieldLabel muted">{field.label}</div>
-        <div className="fieldValue mono">{field.value}</div>
+        <div className="fieldValue mono" title={field.value}>
+          {clip(field.value, CLIP_TEXT)}
+        </div>
       </div>
       <FieldWarning warning={field.warning} />
     </div>

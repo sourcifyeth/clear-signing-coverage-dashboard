@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { LiveRanking, RankedContractRow, RankedSelector } from "./types.ts";
 import { fmtInt, fmtPct, short } from "./buckets.ts";
-import { canonicalSig, contractName, fnShort, REGISTRY_REPO } from "./txMeta.ts";
+import { canonicalSig, clip, contractName, fnShort, REGISTRY_REPO } from "./txMeta.ts";
 
 const REFETCH_MIN_MS = 30_000;
 
@@ -114,7 +114,7 @@ function SelectorChip({ s }: { s: RankedSelector }) {
       rel="noreferrer"
       title={`${s.functionSig ? canonicalSig(s.functionSig) + " " : ""}${s.selector} · ${fmtInt(s.txCount)} txs`}
     >
-      {s.covered ? "✅" : "❌"} {name ?? s.selector}
+      {s.covered ? "✅" : "❌"} {name ? clip(name) : s.selector}
       <span className="muted">{fmtInt(s.txCount)}</span>
     </a>
   );

@@ -14,7 +14,7 @@ import { STANDARD_TOKEN_SELECTORS, excludeParam, fmtInt, fmtPct, signablePct } f
 import { BucketBar, Toggle } from "./BucketBar.tsx";
 import { BlockStrip } from "./BlockStrip.tsx";
 import { RankingPanel } from "./RankingPanel.tsx";
-import { fnName, iconFor, who } from "./txMeta.ts";
+import { clip, CLIP_TEXT, fnName, iconFor, who } from "./txMeta.ts";
 
 type Win = "1h" | "24h" | "7d";
 const WINDOWS: Win[] = ["1h", "24h", "7d"];
@@ -447,15 +447,17 @@ export function TickerRow({
             rel="noreferrer"
             onClick={(e) => e.stopPropagation()}
           >
-            {name && <span className="fnName">{name}</span>}
+            {name && <span className="fnName">{clip(name)}</span>}
             <span className="fnSel">{t.selector}</span>
           </a>
         )}
       </span>
       {!withIdx && <span className="tickBlock mono muted">{fmtInt(t.blockNumber)}</span>}
-      <span className="tickWho">{who(t)}</span>
+      <span className="tickWho" title={who(t)}>
+        {clip(who(t))}
+      </span>
       <span className={`tickIntent ${signed ? "" : "muted"}`} title={t.displayText ?? t.intent ?? undefined}>
-        {signed ? t.displayText ?? t.intent ?? "" : t.intent ?? (t.warnings[0] ? t.warnings[0].code : "")}
+        {clip(signed ? t.displayText ?? t.intent ?? "" : t.intent ?? (t.warnings[0] ? t.warnings[0].code : ""), CLIP_TEXT)}
       </span>
       <a
         className="tickHash mono muted"
