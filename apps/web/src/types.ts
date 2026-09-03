@@ -151,6 +151,13 @@ export interface LiveBlockEvent {
   blocks: BlockStat[];
 }
 
+/** /api/live/block/:number */
+export interface BlockDetail {
+  block: LatestBlock;
+  stat: BlockStat;
+  txs: LiveTx[];
+}
+
 export interface LiveLatest {
   latest: LatestBlock | null;
   blocks: number;

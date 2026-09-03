@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { BlockStat, LatestBlock, LiveBlockEvent, LiveSummary, LiveTx } from "./types.ts";
 import { STANDARD_TOKEN_SELECTORS, excludeParam, fmtInt, fmtPct, signablePct } from "./buckets.ts";
-import { BucketBar, Toggle, Stat, numOr } from "./BucketBar.tsx";
+import { BucketBar, Toggle } from "./BucketBar.tsx";
 import { BlockStrip } from "./BlockStrip.tsx";
 import { RankingPanel } from "./RankingPanel.tsx";
 import { fnName, iconFor, who } from "./txMeta.ts";
@@ -60,10 +60,12 @@ function mergeBlocks(prev: BlockStat[], incoming: BlockStat[]): BlockStat[] {
 export function LivePanel({
   state,
   onInspect,
+  onOpenBlock,
   onLatest,
 }: {
   state: ToggleState;
   onInspect: (hash: string) => void;
+  onOpenBlock?: (blockNumber: number) => void;
   onLatest?: (latest: LatestBlock | null) => void;
 }) {
   const [latest, setLatest] = useState<LatestBlock | null>(null);
@@ -262,7 +264,7 @@ export function LivePanel({
         ) : (
           s && (
             <>
-              <div className="grid2">
+              <div className="heroWrap">
                 <div className="hero">
                   <div className="heroNum">{fmtPct(signablePct(s.buckets, total, state.countEth, state.countToken))}</div>
                   <div className="heroLabel">
@@ -305,33 +307,13 @@ export function LivePanel({
                   )}
                 </div>
 
-                <div>
-                  <div className="reachRow">
-                    <div className="reach">
-                      <div className="reachNum">{numOr(s.ranking.contractsToReach80)}</div>
-                      <div className="reachLabel">contracts to reach 80%</div>
-                    </div>
-                    <div className="reach">
-                      <div className="reachNum">{numOr(s.ranking.contractsToReach95)}</div>
-                      <div className="reachLabel">contracts to reach 95%</div>
-                    </div>
-                  </div>
-                  <div className="denoms">
-                    <Stat
-                      label={excluding ? `Contract calls counted, last ${win}` : `Transactions, last ${win}`}
-                      value={fmtInt(total)}
-                    />
-                    <Stat label="Blocks" value={fmtInt(s.blocks)} />
-                    <Stat label="Uncovered contracts" value={fmtInt(s.ranking.totalContracts)} />
-                  </div>
-                </div>
               </div>
 
               <div className="liveBar">
                 <BucketBar buckets={s.buckets} total={total} />
               </div>
 
-              <BlockStrip blocks={blocks} countEth={state.countEth} countToken={state.countToken} />
+              <BlockStrip blocks={blocks} countEth={state.countEth} countToken={state.countToken} onOpen={onOpenBlock} />
 
               <div className="tickerHead muted small">
                 Newest transactions — click one for details
@@ -391,7 +373,7 @@ function TickerIcon({ tx: t }: { tx: LiveTx }) {
   );
 }
 
-function TickerRow({
+export function TickerRow({
   tx: t,
   fresh,
   delayMs = 0,

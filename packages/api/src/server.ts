@@ -50,6 +50,7 @@ import {
   recentTxs,
   liveTx,
   blockStats,
+  blockDetail,
   liveRanking,
   registryCommit,
   type Bucket,
@@ -132,6 +133,16 @@ app.get("/api/live/latest", (_req, res) => {
 app.get("/api/live/blocks", (req, res) => {
   res.set("Cache-Control", "no-cache");
   res.json(blockStats(db, intQuery(req.query.limit, 60)));
+});
+
+// One block: header, breakdown, and all of its stored transaction rows.
+app.get("/api/live/block/:number", (req, res) => {
+  const n = Number(req.params.number);
+  if (!Number.isInteger(n) || n < 0) return res.status(400).json({ error: "invalid block number" });
+  const d = blockDetail(db, n);
+  if (!d) return res.status(404).json({ error: "block not in the live index" });
+  res.set("Cache-Control", "no-cache");
+  res.json(d);
 });
 
 // Contracts or functions in the window, ranked by transaction count, with coverage.

@@ -1140,3 +1140,50 @@ footer {
   border-left: 3px solid var(--coral);
   padding-left: 12px;
 }
+
+/* ---------------------------------------------------------------------------
+   block modal */
+.modal.wide {
+  max-width: 960px;
+}
+.blockStats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin: 6px 0 14px;
+}
+@media (max-width: 760px) {
+  .blockStats {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.blockStat {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.ticker.tall {
+  max-height: 60vh;
+}
+.stripCol.clickable {
+  cursor: pointer;
+}
+.stripCol.clickable:focus-visible {
+  outline: 2px solid var(--blue);
+}
+.linkBtn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--blue);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.heroWrap {
+  margin-bottom: 16px;
+}
+.heroWrap .disclaimer {
+  max-width: 720px;
+}

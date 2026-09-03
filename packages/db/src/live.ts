@@ -567,6 +567,78 @@ export function blockStats(db: Db, limit = 60): BlockStat[] {
   }));
 }
 
+export interface BlockDetail {
+  block: LatestBlock;
+  stat: BlockStat;
+  txs: LiveTxOut[];
+}
+
+/** One block: header, bucket breakdown, and every stored transaction row (in block order). */
+export function blockDetail(db: Db, number: number, chainId = 1): BlockDetail | undefined {
+  const b = db
+    .prepare("SELECT number, hash, block_time, tx_count, processed_at FROM blocks WHERE number = ?")
+    .get(number) as { number: number; hash: string; block_time: string; tx_count: number; processed_at: string } | undefined;
+  if (!b) return undefined;
+  const stat = blockStatsFor(db, [number])[0] ?? {
+    number,
+    timeIso: b.block_time,
+    total: 0,
+    eth: 0,
+    tokenStd: 0,
+    coveredOther: 0,
+    notCovered: 0,
+    creation: 0,
+  };
+  const rows = db
+    .prepare(`${LIVE_TX_SELECT} WHERE t.block_number = ? ORDER BY t.rowid ASC`)
+    .all(chainId, number) as RawLiveTx[];
+  return {
+    block: { number: b.number, hash: b.hash, timeIso: b.block_time, txCount: b.tx_count, processedAtIso: b.processed_at },
+    stat,
+    txs: rows.map(toLiveTx),
+  };
+}
+
+/** Bucket breakdown for specific block numbers (same shape as blockStats). */
+function blockStatsFor(db: Db, numbers: number[]): BlockStat[] {
+  if (numbers.length === 0) return [];
+  const inList = numbers.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT g.block_number AS number, MAX(g.block_time) AS block_time,
+              SUM(g.tx_count) AS total,
+              SUM(CASE WHEN g.bucket = 'eth_transfer' THEN g.tx_count ELSE 0 END) AS eth,
+              SUM(CASE WHEN g.selector IN (${STANDARD_TOKEN_SELECTORS_SQL}) THEN g.tx_count ELSE 0 END) AS token_std,
+              SUM(CASE WHEN g.bucket = 'covered_theory' AND g.selector NOT IN (${STANDARD_TOKEN_SELECTORS_SQL}) THEN g.tx_count ELSE 0 END) AS covered_other,
+              SUM(CASE WHEN g.bucket = 'not_covered' THEN g.tx_count ELSE 0 END) AS not_covered,
+              SUM(CASE WHEN g.bucket = 'contract_creation' THEN g.tx_count ELSE 0 END) AS creation
+       FROM block_groups g
+       WHERE g.block_number IN (${inList})
+       GROUP BY g.block_number
+       ORDER BY g.block_number ASC`,
+    )
+    .all(...numbers) as {
+    number: number;
+    block_time: string;
+    total: number;
+    eth: number;
+    token_std: number;
+    covered_other: number;
+    not_covered: number;
+    creation: number;
+  }[];
+  return rows.map((r) => ({
+    number: r.number,
+    timeIso: r.block_time,
+    total: r.total,
+    eth: r.eth,
+    tokenStd: r.token_std,
+    coveredOther: r.covered_other,
+    notCovered: r.not_covered,
+    creation: r.creation,
+  }));
+}
+
 /** The registry commit the follower last loaded the coverage set from. */
 export function registryCommit(db: Db): string | null {
   const r = db.prepare("SELECT registry_commit FROM coverage LIMIT 1").get() as { registry_commit: string | null } | undefined;

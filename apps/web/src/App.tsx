@@ -13,6 +13,7 @@ import type { LatestBlock, LiveLatest, Report } from "./types.ts";
 import { labelFor } from "./labels.ts";
 import { LivePanel, type ToggleState } from "./LivePanel.tsx";
 import { TxModal } from "./TxModal.tsx";
+import { BlockModal } from "./BlockModal.tsx";
 import { BucketBar, Toggle, Stat, numOr } from "./BucketBar.tsx";
 import { fmtInt, fmtPct, short, signablePct } from "./buckets.ts";
 import { REGISTRY_REPO } from "./txMeta.ts";
@@ -26,6 +27,7 @@ export function App() {
   const [countEth, setCountEth] = useState(false);
   const [countToken, setCountToken] = useState(false);
   const [modalHash, setModalHash] = useState<string | null>(null);
+  const [modalBlock, setModalBlock] = useState<number | null>(null);
 
   useEffect(() => {
     fetch("/api/live/latest")
@@ -98,7 +100,7 @@ export function App() {
       </header>
 
       {/* Live: block follower, rankings */}
-      <LivePanel state={state} onInspect={setModalHash} onLatest={setLatest} />
+      <LivePanel state={state} onInspect={setModalHash} onOpenBlock={setModalBlock} onLatest={setLatest} />
 
       {/* Archived BigQuery snapshot, kept for reference */}
       {report && (
@@ -111,6 +113,16 @@ export function App() {
         </details>
       )}
 
+      {modalBlock !== null && !modalHash && (
+        <BlockModal
+          number={modalBlock}
+          countEth={countEth}
+          countToken={countToken}
+          onClose={() => setModalBlock(null)}
+          onInspect={setModalHash}
+        />
+      )}
+      {/* a transaction opened from the block modal returns to it on close */}
       {modalHash && <TxModal hash={modalHash} onClose={() => setModalHash(null)} />}
     </div>
     </>

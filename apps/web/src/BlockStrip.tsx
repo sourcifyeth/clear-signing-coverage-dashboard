@@ -28,10 +28,13 @@ export function BlockStrip({
   blocks,
   countEth,
   countToken,
+  onOpen,
 }: {
   blocks: BlockStat[];
   countEth: boolean;
   countToken: boolean;
+  /** click on a column */
+  onOpen?: (blockNumber: number) => void;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   if (blocks.length === 0) return null;
@@ -57,7 +60,7 @@ export function BlockStrip({
           </span>
         </div>
         <div className="muted small">
-          last {blocks.length} blocks · ~{Math.round((blocks.length * 12) / 60)} min
+          last {blocks.length} blocks · ~{Math.round((blocks.length * 12) / 60)} min{onOpen && " · click a block for details"}
         </div>
       </div>
 
@@ -68,8 +71,12 @@ export function BlockStrip({
           return (
             <div
               key={b.number}
-              className={`stripCol ${isLast ? "last" : ""} ${hover === i ? "hover" : ""}`}
+              className={`stripCol ${isLast ? "last" : ""} ${hover === i ? "hover" : ""} ${onOpen ? "clickable" : ""}`}
               onMouseEnter={() => setHover(i)}
+              onClick={() => onOpen?.(b.number)}
+              role={onOpen ? "button" : undefined}
+              tabIndex={onOpen ? 0 : undefined}
+              onKeyDown={(e) => e.key === "Enter" && onOpen?.(b.number)}
               aria-label={`block ${b.number}: ${s.signable} of ${s.counted} clear-signable`}
             >
               <div className="stripRest" style={{ height: `${100 - s.pct}%` }} />
