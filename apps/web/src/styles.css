@@ -2186,3 +2186,9 @@ footer {
   pointer-events: none;
   z-index: 6;
 }
+
+/* info tooltip: blank lines in data-tip become paragraph breaks */
+.infoTip[data-tip]:hover::after,
+.infoTip[data-tip]:focus-visible::after {
+  white-space: pre-line;
+}
