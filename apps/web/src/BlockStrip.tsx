@@ -84,7 +84,12 @@ export function BlockStrip({
               onKeyDown={(e) => e.key === "Enter" && onOpen?.(b.number)}
               aria-label={`block ${b.number}: ${s.signable} of ${s.counted} clear-signable`}
             >
-              <div className="stripRest" style={{ height: `${100 - s.pct}%` }} />
+              {/* top: not-covered calls to unverified contracts; then the rest; bottom: clear-signable */}
+              <div className="stripRestUnv" style={{ height: `${s.counted > 0 ? ((b.notCoveredUnverified ?? 0) / s.counted) * 100 : 0}%` }} />
+              <div
+                className="stripRest"
+                style={{ height: `${Math.max(0, 100 - s.pct - (s.counted > 0 ? ((b.notCoveredUnverified ?? 0) / s.counted) * 100 : 0))}%` }}
+              />
               <div className="stripSig" style={{ height: `${s.pct}%` }} />
             </div>
           );
@@ -104,6 +109,9 @@ export function BlockStrip({
             <div className="muted">
               {fmtInt(shown.total)} txs · {fmtInt(shown.eth)} ETH · {fmtInt(shown.tokenStd)} token ·{" "}
               {fmtInt(shown.coveredOther)} covered · {fmtInt(shown.notCovered)} not covered
+              {shown.notCoveredUnverified !== undefined && shown.notCoveredUnverified > 0 && (
+                <> ({fmtInt(shown.notCoveredUnverified)} unverified)</>
+              )}
             </div>
           </div>
         )}
@@ -119,6 +127,9 @@ export function BlockStrip({
         </div>
         <div className="legendItem">
           <span className="swatch" style={{ background: "#ffccd0" }} /> not clear-signable
+        </div>
+        <div className="legendItem">
+          <span className="swatch" style={{ background: COLOR.noUnverified, opacity: 0.6 }} /> of which unverified on Sourcify
         </div>
         <div className="legendItem muted">bar height = share of the block's {what}</div>
       </div>

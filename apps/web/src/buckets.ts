@@ -15,9 +15,44 @@ export const COLOR = {
   okText: "#16a34a",
   no: "#ff858d",
   noText: "#ae373f",
+  /** not covered AND unverified on Sourcify: a deeper coral (ΔE 16.5 from `no`, CVD-safe) */
+  noUnverified: "#c4535b",
   token: "#7693da",
   eth: "#a9bdee",
 } as const;
+
+/** One slice of the bucket bar / legend. */
+export interface Segment {
+  key: string;
+  label: string;
+  color: string;
+  value: number;
+}
+
+/**
+ * The bar's slices in order. "Not covered" is split by Sourcify verification
+ * when the API reports the unverified part: verified contracts first (a
+ * descriptor can be written), then unverified ones (no ABI to build on).
+ * Contracts not yet checked count as verified, so the unverified slice is a
+ * lower bound. The denominator does not change.
+ */
+export function segments(b: Buckets, notCoveredUnverified?: number): Segment[] {
+  const unv = Math.max(0, Math.min(notCoveredUnverified ?? 0, b.not_covered));
+  const split = notCoveredUnverified !== undefined;
+  return [
+    { key: "covered_theory", label: "Covered by descriptor", color: BUCKET_COLOR.covered_theory, value: b.covered_theory },
+    { key: "eth_transfer", label: "ETH transfer", color: BUCKET_COLOR.eth_transfer, value: b.eth_transfer },
+    { key: "token_native", label: "Token transfer / approve", color: BUCKET_COLOR.token_native, value: b.token_native },
+    {
+      key: "not_covered",
+      label: split ? "Not covered (verified)" : "Not covered",
+      color: COLOR.no,
+      value: b.not_covered - unv,
+    },
+    ...(split ? [{ key: "not_covered_unverified", label: "Not covered (unverified)", color: COLOR.noUnverified, value: unv }] : []),
+    { key: "contract_creation", label: "Contract creation", color: BUCKET_COLOR.contract_creation, value: b.contract_creation },
+  ];
+}
 
 export const BUCKET_COLOR: Record<BucketKey, string> = Object.fromEntries(
   BUCKETS.map((b) => [b.key, b.color]),

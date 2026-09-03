@@ -49,13 +49,18 @@ export function fnShort(sig: string | null): string | null {
   return sig ? sig.split("(")[0] : null;
 }
 
-/** Contract label for a row: entity from the registry, else a known label, else the short address. */
-/** A real name for the contract (registry entity or a known label), or null when we only have the address. */
-export function knownName(toAddress: string | null, entity: string | null): string | null {
+/**
+ * A real name for the contract, or null when we only have the address:
+ * the registry entity, else a known label, else Sourcify's contract name
+ * (from the verification cache).
+ */
+export function knownName(toAddress: string | null, entity: string | null, sourcifyName?: string | null): string | null {
   if (entity) return entity;
-  return toAddress ? labelFor(toAddress) : null;
+  const label = toAddress ? labelFor(toAddress) : null;
+  return label ?? sourcifyName ?? null;
 }
 
+/** Contract label for a row: entity from the registry, else a known label, else the short address. */
 export function contractName(toAddress: string | null, entity: string | null): string {
   if (entity) return entity;
   if (!toAddress) return "?";

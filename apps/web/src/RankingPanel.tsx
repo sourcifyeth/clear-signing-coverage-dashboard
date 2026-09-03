@@ -9,10 +9,43 @@
 import { useEffect, useRef, useState } from "react";
 import type { LiveRanking, RankedContractRow, RankedSelector } from "./types.ts";
 import { fmtInt, fmtPct, short } from "./buckets.ts";
-import { canonicalSig, clip, contractName, contractUrl, fnShort, REGISTRY_REPO } from "./txMeta.ts";
+import { canonicalSig, clip, contractUrl, fnShort, knownName, REGISTRY_REPO } from "./txMeta.ts";
 
 const REFETCH_MIN_MS = 30_000;
 const PAGE_SIZES = [25, 50, 100] as const;
+const VERIFIED_ONLY_KEY = "ccd.rankingVerifiedOnly";
+
+function loadVerifiedOnly(): boolean {
+  try {
+    return localStorage.getItem(VERIFIED_ONLY_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function saveVerifiedOnly(v: boolean): void {
+  try {
+    localStorage.setItem(VERIFIED_ONLY_KEY, v ? "1" : "0");
+  } catch {
+    /* storage blocked */
+  }
+}
+
+/** Sourcify verification pill, table-sized. Nothing while the cache has not classified the address. */
+function VerifiedMini({ verified }: { verified: boolean | null | undefined }) {
+  if (verified === true)
+    return (
+      <span className="verifyBadge yes mini" data-tip="Verified on Sourcify">
+        <img src="/sourcify.png" alt="" /> Verified
+      </span>
+    );
+  if (verified === false)
+    return (
+      <span className="verifyBadge no mini" data-tip="No verified source on Sourcify; no ABI to write a descriptor from">
+        ⊘ Not verified
+      </span>
+    );
+  return null;
+}
 
 export function RankingPanel({
   win,
@@ -34,17 +67,20 @@ export function RankingPanel({
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0]);
+  /** only contracts the Sourcify cache marks verified (remembered per browser) */
+  const [verifiedOnly, setVerifiedOnly] = useState<boolean>(loadVerifiedOnly);
   const lastFetch = useRef(0);
   /** the window+toggles the current page belongs to; null before the first load */
   const loadedFilter = useRef<string | null>(null);
-  const filter = `${win}${exclude}`;
+  const verifiedParam = verifiedOnly ? "&verified=only" : "";
+  const filter = `${win}${exclude}${verifiedParam}`;
 
   async function load(userTriggered: boolean, pg: number, size: number) {
     lastFetch.current = Date.now();
     setLoading(true);
     if (userTriggered) onBusy?.(1);
     try {
-      const r = await fetch(`/api/live/ranking?window=${win}&by=contract&limit=${size}&offset=${pg * size}${exclude}`);
+      const r = await fetch(`/api/live/ranking?window=${win}&by=contract&limit=${size}&offset=${pg * size}${exclude}${verifiedParam}`);
       if (r.ok) {
         // An API older than the paging change returns neither `offset` nor
         // `total`; keep the requested offset so ranks never turn into NaN.
@@ -90,6 +126,18 @@ export function RankingPanel({
     <section className="card">
       <div className="rankHead">
         <h3>Contracts by transaction count · last {win}</h3>
+        <label className="verifiedOnly small" title="Hide contracts that are not verified on Sourcify (no ABI, so no descriptor can be written)">
+          <input
+            type="checkbox"
+            checked={verifiedOnly}
+            onChange={(e) => {
+              setVerifiedOnly(e.target.checked);
+              saveVerifiedOnly(e.target.checked);
+              setPage(0);
+            }}
+          />{" "}
+          Verified only
+        </label>
       </div>
       <p className="muted small">
         Every contract called in the window, most transactions first. ✅ has an ERC-7730 descriptor
@@ -190,15 +238,28 @@ function SelectorChip({ s }: { s: RankedSelector }) {
   );
 }
 
-function ContractCell({ toAddress, entity }: { toAddress: string; entity: string | null }) {
-  const name = contractName(toAddress, entity);
-  const isAddr = name === short(toAddress);
+function ContractCell({ row }: { row: RankedContractRow }) {
+  // registry entity, else a known label, else Sourcify's name from the verification cache
+  const name = knownName(row.toAddress, row.entity, row.sourcifyName ?? null);
   return (
     <span className="contractCell">
-      {!isAddr && <span className="contractName">{name}</span>}
-      <a className="mono muted" href={contractUrl(1, toAddress)} target="_blank" rel="noreferrer">
-        {short(toAddress)}
-      </a>
+      {name && (
+        <span className="contractName" title={name}>
+          {clip(name)}
+        </span>
+      )}
+      <span className="contractAddr">
+        {row.verified ? (
+          <a className="mono muted" href={contractUrl(1, row.toAddress)} target="_blank" rel="noreferrer" title={row.toAddress}>
+            {short(row.toAddress)}
+          </a>
+        ) : (
+          <span className="mono muted" title={row.toAddress}>
+            {short(row.toAddress)}
+          </span>
+        )}{" "}
+        <VerifiedMini verified={row.verified} />
+      </span>
     </span>
   );
 }
@@ -224,7 +285,7 @@ function ContractTable({ rows, offset }: { rows: RankedContractRow[]; offset: nu
             <tr key={c.toAddress} className={c.coveredTx === c.txCount ? "rowOk" : c.coveredTx > 0 ? "rowPart" : ""}>
               <td className="muted rankIdx">{fmtInt(offset + i + 1)}</td>
               <td>
-                <ContractCell toAddress={c.toAddress} entity={c.entity} />
+                <ContractCell row={c} />
                 {c.entity && (
                   <a
                     className="muted small regLink"

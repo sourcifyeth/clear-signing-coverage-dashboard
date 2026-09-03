@@ -176,7 +176,7 @@ function Body({
         </div>
       </div>
 
-      <BucketBar buckets={buckets} total={stat.total} />
+      <BucketBar buckets={buckets} total={stat.total} unverified={stat.notCoveredUnverified} />
 
       <div className="tickerHead muted small" style={{ marginTop: 18 }}>
         Transactions in this block — click one for details

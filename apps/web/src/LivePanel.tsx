@@ -357,7 +357,14 @@ export function LivePanel({
               </div>
 
               <div className="liveBar">
-                <BucketBar buckets={s.buckets} total={total} />
+                <BucketBar buckets={s.buckets} total={total} unverified={s.notCoveredUnverified} />
+                {s.notCoveredUnverified !== undefined && s.verificationCoverage && s.buckets.not_covered > 0 && (
+                  <div className="muted small unverifiedNote">
+                    {fmtPct((s.notCoveredUnverified / s.buckets.not_covered) * 100)} of uncovered calls go to contracts that are not
+                    verified on Sourcify ({fmtInt(s.verificationCoverage.checked)} of {fmtInt(s.verificationCoverage.total)} uncovered
+                    contracts classified{s.verificationCoverage.checked < s.verificationCoverage.total && ", busiest first"})
+                  </div>
+                )}
               </div>
 
               <BlockStrip blocks={blocks} countEth={state.countEth} countToken={state.countToken} onOpen={onOpenBlock} />

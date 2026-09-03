@@ -55,26 +55,25 @@ function CopyButton({ text }: { text: string }) {
  * repository page) when verified, a gray mark when not. Nothing while loading
  * or when Sourcify could not be reached.
  */
-function VerifiedBadge({ address }: { address: string }) {
+function VerifiedBadge({ address, known }: { address: string; known?: boolean | null }) {
+  // The server's verification cache answers instantly; Sourcify is asked live
+  // only for an address the cache has not classified (or on an older API).
   const [v, setV] = useState<Verification | null>(null);
   useEffect(() => {
     let cancelled = false;
     setV(null);
+    if (known === true || known === false) return;
     void fetchVerification(1, address).then((r) => !cancelled && setV(r));
     return () => {
       cancelled = true;
     };
-  }, [address]);
-  if (!v || v.status === "unknown") return null;
-  if (v.status === "verified")
+  }, [address, known]);
+  const status: Verification | null = known === true ? { status: "verified", match: "match" } : known === false ? { status: "unverified" } : v;
+  if (!status || status.status === "unknown") return null;
+  const matchTip = status.status === "verified" && status.match === "exact_match" ? "Exact match" : "Match";
+  if (status.status === "verified")
     return (
-      <a
-        className="verifyBadge yes"
-        href={contractUrl(1, address)}
-        target="_blank"
-        rel="noreferrer"
-        data-tip={`${v.match === "exact_match" ? "Exact match" : "Match"} on Sourcify · open in the repository`}
-      >
+      <a className="verifyBadge yes" href={contractUrl(1, address)} target="_blank" rel="noreferrer" data-tip={`${matchTip} on Sourcify · open in the repository`}>
         <img src="/sourcify.png" alt="" /> Verified ↗
       </a>
     );
@@ -237,7 +236,7 @@ function bannerText(row: LiveTxDetail): { title: string; sub: string } {
 function TxBody({ row }: { row: LiveTxDetail }) {
   const icon = iconFor(row);
   const banner = bannerText(row);
-  const name = knownName(row.toAddress, row.entity);
+  const name = knownName(row.toAddress, row.entity, row.sourcifyName ?? null);
   const sig = row.functionSig ? canonicalSig(row.functionSig) : null;
   return (
     <>
@@ -266,7 +265,7 @@ function TxBody({ row }: { row: LiveTxDetail }) {
                     <b title={name}>{clip(name)}</b>{" "}
                   </>
                 )}
-                <span className="mono muted">{row.toAddress}</span> <VerifiedBadge address={row.toAddress} />
+                <span className="mono muted">{row.toAddress}</span> <VerifiedBadge address={row.toAddress} known={row.verified ?? null} />
               </>
             ) : (
               "— (contract creation)"

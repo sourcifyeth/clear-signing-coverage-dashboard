@@ -2023,3 +2023,57 @@ footer {
 .plainBtn:hover {
   color: var(--blue);
 }
+
+/* --- Sourcify verification (contracts cache) --- */
+
+/* table-sized verification pill */
+.verifyBadge.mini {
+  padding: 0 6px 0 4px;
+  font-size: 10px;
+  line-height: 1.5;
+  gap: 4px;
+  top: 0;
+}
+.verifyBadge.mini img {
+  width: 11px;
+  height: 11px;
+}
+.contractAddr {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+/* "Verified only" checkbox in the ranking header */
+.rankHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.rankHead .verifiedOnly {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rankHead .verifiedOnly input {
+  accent-color: var(--blue);
+}
+
+/* block strip: the unverified part of the red sits at the top of the column */
+.stripRestUnv {
+  background: #c4535b;
+  opacity: 0.6;
+  width: 100%;
+  flex: none;
+}
+
+/* line under the bucket bar */
+.unverifiedNote {
+  margin-top: 6px;
+}

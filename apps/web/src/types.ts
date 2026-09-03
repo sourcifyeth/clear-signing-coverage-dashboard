@@ -90,6 +90,10 @@ export interface LiveSummary {
   /** the part of `native` removed from totalTx by the filter */
   excluded: { ethTransfers: number; tokenTransfers: number };
   buckets: Buckets;
+  /** part of buckets.not_covered whose target Sourcify knows to be unverified (absent on an older API) */
+  notCoveredUnverified?: number;
+  /** how many of the not-covered contracts the verification cache has classified */
+  verificationCoverage?: { checked: number; total: number };
   headline: {
     theoryPctOfAll: number;
     theoryPlusNativePctOfAll: number;
@@ -122,6 +126,10 @@ export interface LiveTx {
   functionSig: string | null;
   /** registry path of the covering descriptor, e.g. "registry/lido/calldata-wstETH.json" */
   descriptorPath: string | null;
+  /** Sourcify verification from the server cache: null = not checked yet (or an older API) */
+  verified?: boolean | null;
+  /** Sourcify's contract name when verified */
+  sourcifyName?: string | null;
 }
 
 /** /api/live/tx/:hash — a stored row plus the library's DisplayModel. */
@@ -142,6 +150,8 @@ export interface BlockStat {
   /** covered calls that are not standard token calls */
   coveredOther: number;
   notCovered: number;
+  /** part of notCovered to contracts Sourcify knows to be unverified (absent on an older API) */
+  notCoveredUnverified?: number;
   creation: number;
 }
 
@@ -186,6 +196,10 @@ export interface RankedContractRow {
   coveredPct: number;
   distinctSelectors: number;
   topSelectors: RankedSelector[];
+  /** Sourcify verification from the server cache: null = not checked yet (or an older API) */
+  verified?: boolean | null;
+  /** Sourcify's contract name when verified */
+  sourcifyName?: string | null;
 }
 
 export interface RankedFunctionRow {
