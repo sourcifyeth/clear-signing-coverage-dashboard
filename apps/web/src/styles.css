@@ -1946,3 +1946,19 @@ footer {
   font-size: 11px;
   border-style: dashed;
 }
+
+/* verification pill: icon and text centred on the same line as the address */
+.verifyBadge {
+  vertical-align: middle;
+  line-height: 1;
+  padding: 3px 8px 3px 6px;
+  position: relative;
+  top: -1px;
+}
+.verifyBadge.yes img {
+  display: block;
+  margin: 0;
+}
+.verifyBadge.no {
+  line-height: 1;
+}
