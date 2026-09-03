@@ -172,10 +172,10 @@ function Value({ value, param }: { value: unknown; param: ParamLike }) {
 }
 
 const SOURCE_NOTE: Record<Source, string> = {
-  sourcify: "Decoded with the verified ABI from Sourcify",
-  "sourcify+implementation": "Decoded with the verified ABI from Sourcify (proxy; implementation ABI)",
-  descriptor: "Decoded with the ABI in the ERC-7730 descriptor",
-  signature: "Decoded from the function signature (4byte.sourcify.dev); parameter names are not known",
+  sourcify: "via verified ABI",
+  "sourcify+implementation": "via verified ABI (implementation)",
+  descriptor: "via descriptor ABI",
+  signature: "via 4byte signature",
 };
 
 export function DecodedCalldata({
