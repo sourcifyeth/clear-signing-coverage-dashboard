@@ -157,6 +157,8 @@ app.get("/api/live/ranking", (req, res) => {
       by,
       limit: intQuery(req.query.limit, 100),
       offset: intQuery(req.query.offset, 0),
+      // `verified=only`: contracts the Sourcify cache marks verified
+      verifiedOnly: req.query.verified === "only",
       ...excludeQuery(req.query.exclude),
     }),
   );

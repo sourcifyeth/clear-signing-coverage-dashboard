@@ -11,6 +11,7 @@ import type { Db } from "./index.js";
 import type { Bucket, PracticalStatus } from "./write.js";
 import { computeRanking, rankingCurve, pct, type RankedContract } from "./ranking.js";
 import { STANDARD_TOKEN_SELECTORS_SQL, excludeSql, type ExcludeOptions } from "./selectors.js";
+import { getContracts } from "./contracts.js";
 
 // ---------------------------------------------------------------------------
 // Write
@@ -202,6 +203,14 @@ export interface LiveSummary {
   /** the part of `native` the filter removed from totalTx */
   excluded: { ethTransfers: number; tokenTransfers: number };
   buckets: Record<Bucket, number>;
+  /**
+   * Part of buckets.not_covered whose target the Sourcify cache knows to be
+   * unverified (no ABI, so no descriptor can be written). Contracts not yet
+   * checked count as verified here, so this is a lower bound.
+   */
+  notCoveredUnverified: number;
+  /** how much of the not-covered contract set the verification cache has classified */
+  verificationCoverage: { checked: number; total: number };
   headline: {
     theoryPctOfAll: number;
     theoryPlusNativePctOfAll: number;
@@ -233,14 +242,17 @@ const EMPTY_BUCKETS = (): Record<Bucket, number> => ({
 export function liveSummary(
   db: Db,
   windowHours: number,
-  opts: { limit?: number; curvePoints?: number } & ExcludeOptions = {},
+  opts: { limit?: number; curvePoints?: number; chainId?: number } & ExcludeOptions = {},
 ): LiveSummary {
   const latest = latestBlock(db);
   const toIso = latest?.timeIso ?? new Date().toISOString();
   const fromIso = new Date(new Date(toIso).getTime() - windowHours * 3_600_000).toISOString();
   const limit = Math.max(1, Math.min(opts.limit ?? 200, 5000));
+  const chainId = opts.chainId ?? 1;
   const filter = { excludeEth: !!opts.excludeEth, excludeToken: !!opts.excludeToken };
   const ex = excludeSql(filter);
+  let notCoveredUnverified = 0;
+  const verificationCoverage = { checked: 0, total: 0 };
 
   const range = db
     .prepare(
@@ -301,6 +313,26 @@ export function liveSummary(
         )
         .all(fromIso, toIso) as { to_address: string; selector: string; n: number }[]
     ).map((r) => ({ toAddress: r.to_address, selector: r.selector, txCount: r.n }));
+
+    // Sourcify verification split of the not-covered calls (cache-driven; see contracts.ts).
+    notCoveredUnverified = (
+      db
+        .prepare(
+          `SELECT COALESCE(SUM(g.tx_count), 0) AS n FROM block_groups g
+           JOIN contracts k ON k.chain_id = ? AND k.address = g.to_address AND k.verified = 0
+           WHERE g.block_time >= ? AND g.block_time <= ? AND g.bucket = 'not_covered'${excludeSql(filter, "g")}`,
+        )
+        .get(chainId, fromIso, toIso) as { n: number }
+    ).n;
+    const cov = db
+      .prepare(
+        `SELECT COUNT(DISTINCT g.to_address) AS total, COUNT(DISTINCT k.address) AS checked FROM block_groups g
+         LEFT JOIN contracts k ON k.chain_id = ? AND k.address = g.to_address
+         WHERE g.block_time >= ? AND g.block_time <= ? AND g.bucket = 'not_covered'${excludeSql(filter, "g")}`,
+      )
+      .get(chainId, fromIso, toIso) as { total: number; checked: number };
+    verificationCoverage.total = cov.total;
+    verificationCoverage.checked = cov.checked;
   }
 
   const allTx = range.tx;
@@ -325,6 +357,8 @@ export function liveSummary(
     native,
     excluded,
     buckets,
+    notCoveredUnverified,
+    verificationCoverage,
     headline: {
       theoryPctOfAll: pct(buckets.covered_theory, totalTx),
       theoryPlusNativePctOfAll: ranking.baselinePct,
@@ -361,6 +395,10 @@ export interface LiveTxOut {
   functionSig: string | null;
   /** registry path of the descriptor that covers this call, e.g. "registry/lido/calldata-wstETH.json" */
   descriptorPath: string | null;
+  /** Sourcify verification from the cache: null = not checked yet */
+  verified: boolean | null;
+  /** Sourcify's contract name (compilation.name) when verified */
+  sourcifyName: string | null;
 }
 
 export interface LiveTxDetailOut extends LiveTxOut {
@@ -385,14 +423,19 @@ interface RawLiveTx {
   function_sig: string | null;
   descriptor_path: string | null;
   sig_name: string | null;
+  k_verified: number | null;
+  k_name: string | null;
 }
 
+/** Binds chainId twice (coverage join, contracts join) before any WHERE params. */
 const LIVE_TX_SELECT = `
   SELECT t.tx_hash, t.block_number, t.block_hash, t.block_time, t.to_address, t.selector, t.bucket, t.status,
-         t.warnings_json, t.intent, t.display_json, c.entity, c.function_sig, c.descriptor_path, s.name AS sig_name
+         t.warnings_json, t.intent, t.display_json, c.entity, c.function_sig, c.descriptor_path, s.name AS sig_name,
+         k.verified AS k_verified, k.name AS k_name
   FROM tx_index t
   LEFT JOIN coverage c ON c.chain_id = ? AND c.address = t.to_address AND c.selector = t.selector
-  LEFT JOIN signatures s ON s.selector = t.selector`;
+  LEFT JOIN signatures s ON s.selector = t.selector
+  LEFT JOIN contracts k ON k.chain_id = ? AND k.address = t.to_address`;
 
 // ---------------------------------------------------------------------------
 // Selector -> signature cache (filled by the follower from 4byte.sourcify.dev)
@@ -483,6 +526,8 @@ function toLiveTx(r: RawLiveTx): LiveTxOut {
     // registry signature (has parameter names) first, else the 4byte lookup
     functionSig: r.function_sig ?? r.sig_name,
     descriptorPath: r.descriptor_path,
+    verified: r.k_verified === null || r.k_verified === undefined ? null : r.k_verified === 1,
+    sourcifyName: r.k_name ?? null,
   };
 }
 
@@ -494,7 +539,7 @@ export function recentTxs(
   const limit = Math.max(1, Math.min(opts.limit ?? 100, 1000));
   const chainId = opts.chainId ?? 1;
   const where: string[] = ["1 = 1"];
-  const params: unknown[] = [chainId];
+  const params: unknown[] = [chainId, chainId];
   if (opts.bucket) {
     where.push("t.bucket = ?");
     params.push(opts.bucket);
@@ -529,37 +574,39 @@ export interface BlockStat {
   /** covered_theory calls that are NOT standard token calls */
   coveredOther: number;
   notCovered: number;
+  /** part of notCovered whose target the Sourcify cache knows to be unverified */
+  notCoveredUnverified: number;
   creation: number;
 }
 
-/** The newest `limit` blocks, oldest first, each with its bucket breakdown. */
-export function blockStats(db: Db, limit = 60): BlockStat[] {
-  const n = Math.max(1, Math.min(limit, 1000));
-  const rows = db
-    .prepare(
-      `SELECT g.block_number AS number, MAX(g.block_time) AS block_time,
+interface RawBlockStat {
+  number: number;
+  block_time: string;
+  total: number;
+  eth: number;
+  token_std: number;
+  covered_other: number;
+  not_covered: number;
+  not_covered_unverified: number;
+  creation: number;
+}
+
+/** The per-block aggregate columns; `chainId` is embedded as a literal for the contracts join. */
+function blockStatSelect(chainId: number): string {
+  return `SELECT g.block_number AS number, MAX(g.block_time) AS block_time,
               SUM(g.tx_count) AS total,
               SUM(CASE WHEN g.bucket = 'eth_transfer' THEN g.tx_count ELSE 0 END) AS eth,
               SUM(CASE WHEN g.selector IN (${STANDARD_TOKEN_SELECTORS_SQL}) THEN g.tx_count ELSE 0 END) AS token_std,
               SUM(CASE WHEN g.bucket = 'covered_theory' AND g.selector NOT IN (${STANDARD_TOKEN_SELECTORS_SQL}) THEN g.tx_count ELSE 0 END) AS covered_other,
               SUM(CASE WHEN g.bucket = 'not_covered' THEN g.tx_count ELSE 0 END) AS not_covered,
+              SUM(CASE WHEN g.bucket = 'not_covered' AND k.verified = 0 THEN g.tx_count ELSE 0 END) AS not_covered_unverified,
               SUM(CASE WHEN g.bucket = 'contract_creation' THEN g.tx_count ELSE 0 END) AS creation
        FROM block_groups g
-       WHERE g.block_number IN (SELECT number FROM blocks ORDER BY number DESC LIMIT ?)
-       GROUP BY g.block_number
-       ORDER BY g.block_number ASC`,
-    )
-    .all(n) as {
-    number: number;
-    block_time: string;
-    total: number;
-    eth: number;
-    token_std: number;
-    covered_other: number;
-    not_covered: number;
-    creation: number;
-  }[];
-  return rows.map((r) => ({
+       LEFT JOIN contracts k ON k.chain_id = ${Math.floor(Number(chainId))} AND k.address = g.to_address`;
+}
+
+function toBlockStat(r: RawBlockStat): BlockStat {
+  return {
     number: r.number,
     timeIso: r.block_time,
     total: r.total,
@@ -567,8 +614,23 @@ export function blockStats(db: Db, limit = 60): BlockStat[] {
     tokenStd: r.token_std,
     coveredOther: r.covered_other,
     notCovered: r.not_covered,
+    notCoveredUnverified: r.not_covered_unverified,
     creation: r.creation,
-  }));
+  };
+}
+
+/** The newest `limit` blocks, oldest first, each with its bucket breakdown. */
+export function blockStats(db: Db, limit = 60, chainId = 1): BlockStat[] {
+  const n = Math.max(1, Math.min(limit, 1000));
+  const rows = db
+    .prepare(
+      `${blockStatSelect(chainId)}
+       WHERE g.block_number IN (SELECT number FROM blocks ORDER BY number DESC LIMIT ?)
+       GROUP BY g.block_number
+       ORDER BY g.block_number ASC`,
+    )
+    .all(n) as RawBlockStat[];
+  return rows.map(toBlockStat);
 }
 
 export interface BlockDetail {
@@ -591,11 +653,12 @@ export function blockDetail(db: Db, number: number, chainId = 1): BlockDetail | 
     tokenStd: 0,
     coveredOther: 0,
     notCovered: 0,
+    notCoveredUnverified: 0,
     creation: 0,
   };
   const rows = db
     .prepare(`${LIVE_TX_SELECT} WHERE t.block_number = ? ORDER BY t.rowid ASC`)
-    .all(chainId, number) as RawLiveTx[];
+    .all(chainId, chainId, number) as RawLiveTx[];
   return {
     block: { number: b.number, hash: b.hash, timeIso: b.block_time, txCount: b.tx_count, processedAtIso: b.processed_at },
     stat,
@@ -604,43 +667,18 @@ export function blockDetail(db: Db, number: number, chainId = 1): BlockDetail | 
 }
 
 /** Bucket breakdown for specific block numbers (same shape as blockStats). */
-function blockStatsFor(db: Db, numbers: number[]): BlockStat[] {
+function blockStatsFor(db: Db, numbers: number[], chainId = 1): BlockStat[] {
   if (numbers.length === 0) return [];
   const inList = numbers.map(() => "?").join(",");
   const rows = db
     .prepare(
-      `SELECT g.block_number AS number, MAX(g.block_time) AS block_time,
-              SUM(g.tx_count) AS total,
-              SUM(CASE WHEN g.bucket = 'eth_transfer' THEN g.tx_count ELSE 0 END) AS eth,
-              SUM(CASE WHEN g.selector IN (${STANDARD_TOKEN_SELECTORS_SQL}) THEN g.tx_count ELSE 0 END) AS token_std,
-              SUM(CASE WHEN g.bucket = 'covered_theory' AND g.selector NOT IN (${STANDARD_TOKEN_SELECTORS_SQL}) THEN g.tx_count ELSE 0 END) AS covered_other,
-              SUM(CASE WHEN g.bucket = 'not_covered' THEN g.tx_count ELSE 0 END) AS not_covered,
-              SUM(CASE WHEN g.bucket = 'contract_creation' THEN g.tx_count ELSE 0 END) AS creation
-       FROM block_groups g
+      `${blockStatSelect(chainId)}
        WHERE g.block_number IN (${inList})
        GROUP BY g.block_number
        ORDER BY g.block_number ASC`,
     )
-    .all(...numbers) as {
-    number: number;
-    block_time: string;
-    total: number;
-    eth: number;
-    token_std: number;
-    covered_other: number;
-    not_covered: number;
-    creation: number;
-  }[];
-  return rows.map((r) => ({
-    number: r.number,
-    timeIso: r.block_time,
-    total: r.total,
-    eth: r.eth,
-    tokenStd: r.token_std,
-    coveredOther: r.covered_other,
-    notCovered: r.not_covered,
-    creation: r.creation,
-  }));
+    .all(...numbers) as RawBlockStat[];
+  return rows.map(toBlockStat);
 }
 
 /** The registry commit the follower last loaded the coverage set from. */
@@ -672,6 +710,10 @@ export interface RankedContractRow {
   coveredPct: number;
   distinctSelectors: number;
   topSelectors: RankedSelector[];
+  /** Sourcify verification from the cache: null = not checked yet */
+  verified: boolean | null;
+  /** Sourcify's contract name when verified */
+  sourcifyName: string | null;
 }
 
 export interface RankedFunctionRow {
@@ -705,7 +747,7 @@ const CALL_BUCKETS_SQL = "('covered_theory','token_native','not_covered')";
 export function liveRanking(
   db: Db,
   windowHours: number,
-  opts: { by: "contract" | "function"; limit?: number; offset?: number; chainId?: number } & ExcludeOptions,
+  opts: { by: "contract" | "function"; limit?: number; offset?: number; chainId?: number; verifiedOnly?: boolean } & ExcludeOptions,
 ): LiveRanking {
   const latest = latestBlock(db);
   const toIso = latest?.timeIso ?? new Date().toISOString();
@@ -713,11 +755,16 @@ export function liveRanking(
   const limit = Math.max(1, Math.min(opts.limit ?? 100, 1000));
   const offset = Math.max(0, Math.floor(opts.offset ?? 0));
   const chainId = opts.chainId ?? 1;
+  // `verified=only`: keep contracts the Sourcify cache marks verified. The chain
+  // id is embedded as a literal so the positional params stay (from, to, ...).
+  const verifiedSql = opts.verifiedOnly
+    ? ` AND to_address IN (SELECT address FROM contracts WHERE chain_id = ${Math.floor(Number(chainId))} AND verified = 1)`
+    : "";
   // Queries that join coverage/signatures need the block_groups columns
   // qualified, since those tables have a `selector` column too.
   const whereFor = (alias: string) => {
     const p = alias ? `${alias}.` : "";
-    return `${p}block_time >= ? AND ${p}block_time <= ? AND ${p}bucket IN ${CALL_BUCKETS_SQL}${excludeSql(opts, alias)}`;
+    return `${p}block_time >= ? AND ${p}block_time <= ? AND ${p}bucket IN ${CALL_BUCKETS_SQL}${excludeSql(opts, alias)}${verifiedSql.replace("to_address", `${p}to_address`)}`;
   };
   const where = whereFor("");
   const whereG = whereFor("g");
@@ -852,13 +899,18 @@ export function liveRanking(
     selsOf.set(r.to_address, list);
   }
 
+  const verifiedOf = getContracts(db, chainId, addrs);
+
   let cum = skippedTx("to_address");
   const contracts: RankedContractRow[] = rows.map((r) => {
     cum += r.n;
+    const k = verifiedOf.get(r.to_address);
     return {
       toAddress: r.to_address,
       entity: entityOf.get(r.to_address) ?? null,
       inRegistry: entityOf.has(r.to_address),
+      verified: k ? k.verified : null,
+      sourcifyName: k?.name ?? null,
       txCount: r.n,
       sharePct: pct(r.n, totalTx),
       cumulativePct: pct(cum, totalTx),
@@ -875,7 +927,7 @@ export function liveRanking(
 export function liveTx(db: Db, hash: string, chainId = 1): LiveTxDetailOut | undefined {
   const r = db
     .prepare(`${LIVE_TX_SELECT} WHERE t.tx_hash = ?`)
-    .get(chainId, hash.toLowerCase()) as RawLiveTx | undefined;
+    .get(chainId, chainId, hash.toLowerCase()) as RawLiveTx | undefined;
   if (!r) return undefined;
   return {
     ...toLiveTx(r),
