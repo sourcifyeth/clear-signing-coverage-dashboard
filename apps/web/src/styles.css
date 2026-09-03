@@ -585,9 +585,42 @@ button {
   text-decoration: none;
 }
 .winSel {
-  margin-left: auto;
   display: flex;
   gap: 6px;
+}
+/* sticky window selector: sits right under the top bar, above the cards */
+.winBar {
+  position: sticky;
+  top: calc(var(--topbar-h, 72px) + 8px);
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(17, 24, 39, 0.06), 0 8px 24px rgba(17, 24, 39, 0.1);
+}
+.winBar .winLabel {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-soft);
+}
+.winBar .chip {
+  font-size: 14px;
+  font-weight: 500;
+  padding: 7px 18px;
+}
+.winBar .chip.on {
+  box-shadow: 0 2px 8px rgba(43, 80, 170, 0.35);
+}
+.winBar .winHint {
+  margin-left: auto;
 }
 .liveEmpty {
   display: flex;
@@ -969,6 +1002,50 @@ footer {
 .rankTbl td {
   vertical-align: middle;
 }
+/* the rank number never wraps and takes only the width it needs */
+.rankTbl .rankIdx {
+  white-space: nowrap;
+  width: 1%;
+  font-variant-numeric: tabular-nums;
+}
+/* pager under the ranking table */
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.pagerBtns {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pager .chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.pager .chip:disabled:hover {
+  border-color: var(--border-strong);
+  color: var(--text-soft);
+}
+.pagerSize {
+  margin-left: auto;
+}
+.pagerSize select {
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--text);
+}
+/* a table waiting for its next page */
+.pageDim {
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
 .rankTbl tr.rowOk td:first-child {
   box-shadow: inset 3px 0 0 var(--green);
 }
@@ -1323,6 +1400,7 @@ footer {
 .tickIdx {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .tickGroupLabel {
   padding: 8px 12px 4px;

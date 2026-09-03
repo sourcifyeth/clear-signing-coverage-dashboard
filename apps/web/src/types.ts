@@ -204,6 +204,11 @@ export interface LiveRanking {
   window: { hours: number; fromIso: string; toIso: string };
   by: "contract" | "function";
   totalTx: number;
+  /** ranked rows in the window (for paging) */
+  total: number;
+  /** the page served: rows [offset, offset + limit) */
+  offset: number;
+  limit: number;
   contracts?: RankedContractRow[];
   functions?: RankedFunctionRow[];
 }

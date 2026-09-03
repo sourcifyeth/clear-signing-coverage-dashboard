@@ -12,6 +12,7 @@ import { fmtInt, fmtPct, short } from "./buckets.ts";
 import { canonicalSig, clip, contractName, contractUrl, fnShort, REGISTRY_REPO } from "./txMeta.ts";
 
 const REFETCH_MIN_MS = 30_000;
+const PAGE_SIZES = [25, 50, 100] as const;
 
 export function RankingPanel({
   win,
@@ -31,15 +32,19 @@ export function RankingPanel({
 }) {
   const [data, setData] = useState<LiveRanking | null>(null);
   const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0]);
   const lastFetch = useRef(0);
-  const firstLoad = useRef(true);
+  /** the window+toggles the current page belongs to; null before the first load */
+  const loadedFilter = useRef<string | null>(null);
+  const filter = `${win}${exclude}`;
 
-  async function load(userTriggered: boolean) {
+  async function load(userTriggered: boolean, pg: number, size: number) {
     lastFetch.current = Date.now();
     setLoading(true);
     if (userTriggered) onBusy?.(1);
     try {
-      const r = await fetch(`/api/live/ranking?window=${win}&by=contract&limit=100${exclude}`);
+      const r = await fetch(`/api/live/ranking?window=${win}&by=contract&limit=${size}&offset=${pg * size}${exclude}`);
       if (r.ok) setData(await r.json());
     } finally {
       setLoading(false);
@@ -47,19 +52,30 @@ export function RankingPanel({
     }
   }
 
-  // A change of window or toggles is the user's doing: show the overlay.
-  // The very first load is not.
+  // A change of window or toggles goes back to page 1 and shows the page
+  // overlay (it is the user's doing; the very first load is not). A page flip
+  // only dims the table.
   useEffect(() => {
-    const user = !firstLoad.current;
-    firstLoad.current = false;
-    void load(user);
+    const filterChanged = loadedFilter.current !== filter;
+    if (filterChanged && page !== 0) {
+      setPage(0); // this effect runs again with page 0
+      return;
+    }
+    const user = loadedFilter.current !== null && filterChanged;
+    loadedFilter.current = filter;
+    void load(user, page, pageSize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [win, exclude]);
+  }, [filter, page, pageSize]);
 
   useEffect(() => {
-    if (Date.now() - lastFetch.current > REFETCH_MIN_MS) void load(false);
+    if (Date.now() - lastFetch.current > REFETCH_MIN_MS) void load(false, page, pageSize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
+
+  const total = data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const from = data ? data.offset + 1 : 0;
+  const to = data ? data.offset + (data.contracts?.length ?? 0) : 0;
 
   return (
     <section className="card">
@@ -81,7 +97,49 @@ export function RankingPanel({
       {!data ? (
         <div className="muted small">{loading ? "Loading…" : "No data yet."}</div>
       ) : (
-        <ContractTable rows={data.contracts ?? []} />
+        <>
+          <div className={loading ? "pageDim" : ""}>
+            <ContractTable rows={data.contracts ?? []} offset={data.offset} />
+          </div>
+          {total > 0 && (
+            <div className="pager">
+              <span className="muted small">
+                {fmtInt(from)}–{fmtInt(to)} of {fmtInt(total)} contracts
+              </span>
+              <div className="pagerBtns">
+                <button className="chip" disabled={page === 0 || loading} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+                  ← Previous
+                </button>
+                <span className="muted small">
+                  page {fmtInt(page + 1)} / {fmtInt(pageCount)}
+                </span>
+                <button
+                  className="chip"
+                  disabled={page + 1 >= pageCount || loading}
+                  onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+                >
+                  Next →
+                </button>
+              </div>
+              <label className="muted small pagerSize">
+                per page{" "}
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(0);
+                  }}
+                >
+                  {PAGE_SIZES.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
+        </>
       )}
     </section>
   );
@@ -133,7 +191,7 @@ function ContractCell({ toAddress, entity }: { toAddress: string; entity: string
   );
 }
 
-function ContractTable({ rows }: { rows: RankedContractRow[] }) {
+function ContractTable({ rows, offset }: { rows: RankedContractRow[]; offset: number }) {
   if (rows.length === 0) return <div className="muted small">No contract calls in this window.</div>;
   return (
     <div className="tblWrap">
@@ -152,7 +210,7 @@ function ContractTable({ rows }: { rows: RankedContractRow[] }) {
         <tbody>
           {rows.map((c, i) => (
             <tr key={c.toAddress} className={c.coveredTx === c.txCount ? "rowOk" : c.coveredTx > 0 ? "rowPart" : ""}>
-              <td className="muted">{i + 1}</td>
+              <td className="muted rankIdx">{fmtInt(offset + i + 1)}</td>
               <td>
                 <ContractCell toAddress={c.toAddress} entity={c.entity} />
                 {c.entity && (

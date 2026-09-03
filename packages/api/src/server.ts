@@ -156,6 +156,7 @@ app.get("/api/live/ranking", (req, res) => {
     liveRanking(db, hours, {
       by,
       limit: intQuery(req.query.limit, 100),
+      offset: intQuery(req.query.offset, 0),
       ...excludeQuery(req.query.exclude),
     }),
   );

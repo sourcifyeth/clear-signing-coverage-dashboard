@@ -691,6 +691,11 @@ export interface LiveRanking {
   by: "contract" | "function";
   /** contract calls counted in the window after exclusions (the denominator of sharePct) */
   totalTx: number;
+  /** how many ranked rows exist in the window (contracts or functions), for paging */
+  total: number;
+  /** the page served: rows [offset, offset + limit) of the ranking */
+  offset: number;
+  limit: number;
   contracts?: RankedContractRow[];
   functions?: RankedFunctionRow[];
 }
@@ -700,12 +705,13 @@ const CALL_BUCKETS_SQL = "('covered_theory','token_native','not_covered')";
 export function liveRanking(
   db: Db,
   windowHours: number,
-  opts: { by: "contract" | "function"; limit?: number; chainId?: number } & ExcludeOptions,
+  opts: { by: "contract" | "function"; limit?: number; offset?: number; chainId?: number } & ExcludeOptions,
 ): LiveRanking {
   const latest = latestBlock(db);
   const toIso = latest?.timeIso ?? new Date().toISOString();
   const fromIso = new Date(new Date(toIso).getTime() - windowHours * 3_600_000).toISOString();
   const limit = Math.max(1, Math.min(opts.limit ?? 100, 1000));
+  const offset = Math.max(0, Math.floor(opts.offset ?? 0));
   const chainId = opts.chainId ?? 1;
   // Queries that join coverage/signatures need the block_groups columns
   // qualified, since those tables have a `selector` column too.
@@ -722,8 +728,29 @@ export function liveRanking(
     }
   ).n;
   const window = { hours: windowHours, fromIso, toIso };
+  const page = { offset, limit };
+
+  // Cumulative share must carry over from the rows before this page: sum the
+  // volume of the `offset` highest-ranked rows (0 for the first page).
+  const skippedTx = (groupBy: string): number =>
+    offset === 0
+      ? 0
+      : (
+          db
+            .prepare(
+              `SELECT COALESCE(SUM(n), 0) AS n FROM (
+                 SELECT SUM(tx_count) AS n FROM block_groups WHERE ${where} GROUP BY ${groupBy} ORDER BY n DESC LIMIT ?
+               )`,
+            )
+            .get(fromIso, toIso, offset) as { n: number }
+        ).n;
 
   if (opts.by === "function") {
+    const total = (
+      db
+        .prepare(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM block_groups WHERE ${where} GROUP BY to_address, selector)`)
+        .get(fromIso, toIso) as { n: number }
+    ).n;
     const rows = db
       .prepare(
         `SELECT g.to_address, g.selector, MAX(g.bucket) AS bucket, SUM(g.tx_count) AS n,
@@ -734,9 +761,9 @@ export function liveRanking(
          WHERE ${whereG}
          GROUP BY g.to_address, g.selector
          ORDER BY n DESC
-         LIMIT ?`,
+         LIMIT ? OFFSET ?`,
       )
-      .all(chainId, fromIso, toIso, limit) as {
+      .all(chainId, fromIso, toIso, limit, offset) as {
       to_address: string;
       selector: string;
       bucket: Bucket;
@@ -745,7 +772,7 @@ export function liveRanking(
       entity: string | null;
       sig_name: string | null;
     }[];
-    let cum = 0;
+    let cum = skippedTx("to_address, selector");
     const functions: RankedFunctionRow[] = rows.map((r) => {
       cum += r.n;
       return {
@@ -760,9 +787,14 @@ export function liveRanking(
         cumulativePct: pct(cum, totalTx),
       };
     });
-    return { window, by: "function", totalTx, functions };
+    return { window, by: "function", totalTx, total, ...page, functions };
   }
 
+  const total = (
+    db.prepare(`SELECT COUNT(DISTINCT to_address) AS n FROM block_groups WHERE ${where}`).get(fromIso, toIso) as {
+      n: number;
+    }
+  ).n;
   const rows = db
     .prepare(
       `SELECT to_address, SUM(tx_count) AS n,
@@ -772,10 +804,10 @@ export function liveRanking(
        WHERE ${where}
        GROUP BY to_address
        ORDER BY n DESC
-       LIMIT ?`,
+       LIMIT ? OFFSET ?`,
     )
-    .all(fromIso, toIso, limit) as { to_address: string; n: number; covered: number; selectors: number }[];
-  if (rows.length === 0) return { window, by: "contract", totalTx, contracts: [] };
+    .all(fromIso, toIso, limit, offset) as { to_address: string; n: number; covered: number; selectors: number }[];
+  if (rows.length === 0) return { window, by: "contract", totalTx, total, ...page, contracts: [] };
 
   const addrs = rows.map((r) => r.to_address);
   const inList = addrs.map(() => "?").join(",");
@@ -820,7 +852,7 @@ export function liveRanking(
     selsOf.set(r.to_address, list);
   }
 
-  let cum = 0;
+  let cum = skippedTx("to_address");
   const contracts: RankedContractRow[] = rows.map((r) => {
     cum += r.n;
     return {
@@ -836,7 +868,7 @@ export function liveRanking(
       topSelectors: selsOf.get(r.to_address) ?? [],
     };
   });
-  return { window, by: "contract", totalTx, contracts };
+  return { window, by: "contract", totalTx, total, ...page, contracts };
 }
 
 /** One stored transaction with its library result, or undefined if not indexed. */

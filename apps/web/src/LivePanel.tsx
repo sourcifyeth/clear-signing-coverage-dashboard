@@ -18,6 +18,23 @@ import { clip, CLIP_TEXT, fnName, iconFor, who } from "./txMeta.ts";
 
 type Win = "1h" | "24h" | "7d";
 const WINDOWS: Win[] = ["1h", "24h", "7d"];
+const WINDOW_LABEL: Record<Win, string> = { "1h": "Last hour", "24h": "Last 24 hours", "7d": "Last 7 days" };
+
+/**
+ * Keep `--topbar-h` equal to the sticky top bar's height, so the window bar
+ * can stick right under it whatever the bar's wrapped height is.
+ */
+function useTopbarHeight(): void {
+  useEffect(() => {
+    const bar = document.querySelector<HTMLElement>(".topbar");
+    if (!bar) return;
+    const apply = () => document.documentElement.style.setProperty("--topbar-h", `${bar.offsetHeight}px`);
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(bar);
+    return () => ro.disconnect();
+  }, []);
+}
 const TICKER_MAX = 100;
 /** raw rows kept; the visible list is this minus whatever the toggles hide */
 const TICKER_RAW_MAX = 400;
@@ -73,6 +90,7 @@ export function LivePanel({
   const [latest, setLatest] = useState<LatestBlock | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [win, setWin] = useState<Win>("24h");
+  useTopbarHeight();
   const [summary, setSummary] = useState<LiveSummary | null>(null);
   const [txs, setTxs] = useState<LiveTx[]>([]);
   /** rows that arrived over the stream and are not shown yet */
@@ -240,6 +258,18 @@ export function LivePanel({
           </div>
         </div>
       )}
+      {/* The window drives every number on the page, so it stays in view. */}
+      <div className="winBar" role="group" aria-label="Time window">
+        <span className="winLabel">Window</span>
+        <div className="winSel">
+          {WINDOWS.map((w) => (
+            <button key={w} className={`chip ${win === w ? "on" : ""}`} onClick={() => setWin(w)} aria-pressed={win === w}>
+              {WINDOW_LABEL[w]}
+            </button>
+          ))}
+        </div>
+        <span className="winHint muted small">applies to every number on this page</span>
+      </div>
       <section className="card live">
         <div className="liveHead">
           <h3>
@@ -254,13 +284,6 @@ export function LivePanel({
               with {fmtInt(latest.txCount)} txs · {ago(latest.timeIso, now)}
             </div>
           )}
-          <div className="winSel">
-            {WINDOWS.map((w) => (
-              <button key={w} className={`chip ${win === w ? "on" : ""}`} onClick={() => setWin(w)}>
-                {w}
-              </button>
-            ))}
-          </div>
         </div>
 
         {!loaded ? (
