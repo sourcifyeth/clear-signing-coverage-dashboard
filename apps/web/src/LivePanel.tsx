@@ -5,15 +5,24 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { LatestBlock, LiveBlockEvent, LiveSummary, LiveTx } from "./types.ts";
-import { STATUS_COLOR, fmtInt, fmtPct, short, signablePct } from "./buckets.ts";
+import { STANDARD_TOKEN_SELECTORS, STATUS_COLOR, excludeParam, fmtInt, fmtPct, short, signablePct } from "./buckets.ts";
 import { BucketBar, Toggle, Stat, numOr } from "./BucketBar.tsx";
 import { labelFor } from "./labels.ts";
 
 type Win = "1h" | "24h" | "7d";
 const WINDOWS: Win[] = ["1h", "24h", "7d"];
 const TICKER_MAX = 100;
-/** min ms between summary refetches for non-24h windows (24h comes with each SSE event) */
-const REFETCH_MIN_MS = 20_000;
+/** raw rows kept; the visible list is this minus whatever the toggles hide */
+const TICKER_RAW_MAX = 400;
+/** min ms between summary refetches when the SSE summary does not apply (other window, or an exclusion is on) */
+const REFETCH_MIN_MS = 10_000;
+
+/** Is this row hidden by the toggles? Mirrors the API's `exclude=` semantics. */
+function hiddenByToggles(t: LiveTx, countEth: boolean, countToken: boolean): boolean {
+  if (!countEth && t.bucket === "eth_transfer") return true;
+  if (!countToken && STANDARD_TOKEN_SELECTORS.has(t.selector)) return true;
+  return false;
+}
 
 export interface ToggleState {
   countEth: boolean;
@@ -31,7 +40,7 @@ function ago(iso: string, now: number): string {
 
 function mergeTxs(incoming: LiveTx[], prev: LiveTx[]): LiveTx[] {
   const seen = new Set(incoming.map((t) => t.hash));
-  return incoming.concat(prev.filter((t) => !seen.has(t.hash))).slice(0, TICKER_MAX);
+  return incoming.concat(prev.filter((t) => !seen.has(t.hash))).slice(0, TICKER_RAW_MAX);
 }
 
 export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect: (hash: string) => void }) {
@@ -45,6 +54,9 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
   const [activeHash, setActiveHash] = useState<string | null>(null);
   const winRef = useRef<Win>(win);
   const lastFetchRef = useRef(0);
+  /** latest toggle state, readable from the SSE handler */
+  const togglesRef = useRef({ countEth: state.countEth, countToken: state.countToken });
+  togglesRef.current = { countEth: state.countEth, countToken: state.countToken };
   /** hashes present at first load; rows not in here arrived live and get the entry animation */
   const initialRef = useRef<Set<string> | null>(null);
 
@@ -54,10 +66,16 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
     return () => clearInterval(id);
   }, []);
 
+  const exclude = () => excludeParam(togglesRef.current.countEth, togglesRef.current.countToken);
+
   async function fetchSummary(w: Win) {
     lastFetchRef.current = Date.now();
-    const r = await fetch(`/api/live/summary?window=${w}&limit=50`);
+    const r = await fetch(`/api/live/summary?window=${w}&limit=50${exclude()}`);
     if (r.ok) setSummary(await r.json());
+  }
+  async function fetchRecent() {
+    const r = await fetch(`/api/live/recent?limit=${TICKER_MAX}${exclude()}`);
+    if (r.ok) setTxs((await r.json()) as LiveTx[]);
   }
 
   // Initial load.
@@ -68,8 +86,8 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
         setLatest(l.latest ?? null);
         if (l.latest) {
           const [s, recent] = await Promise.all([
-            fetch(`/api/live/summary?window=${winRef.current}&limit=50`).then((r) => r.json()),
-            fetch(`/api/live/recent?limit=${TICKER_MAX}`).then((r) => r.json()),
+            fetch(`/api/live/summary?window=${winRef.current}&limit=50${exclude()}`).then((r) => r.json()),
+            fetch(`/api/live/recent?limit=${TICKER_MAX}${exclude()}`).then((r) => r.json()),
           ]);
           setSummary(s);
           setTxs(recent);
@@ -82,6 +100,7 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
         setLoaded(true);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Window change.
@@ -91,7 +110,17 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [win]);
 
-  // SSE stream. EventSource reconnects on its own.
+  // Toggle change: the exclusion changes the denominator and the list, so both
+  // come from the API again (the list, so it is a full page after filtering).
+  useEffect(() => {
+    if (!loaded || !latest) return;
+    void fetchSummary(winRef.current);
+    void fetchRecent();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.countEth, state.countToken]);
+
+  // SSE stream. EventSource reconnects on its own. The event carries the plain
+  // 24h summary; with an exclusion on, or another window, we refetch instead.
   useEffect(() => {
     const es = new EventSource("/api/live/stream");
     es.onopen = () => setConnected(true);
@@ -100,14 +129,18 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
       const e = JSON.parse((ev as MessageEvent).data) as LiveBlockEvent;
       setLatest(e.block);
       setTxs((prev) => mergeTxs(e.txs, prev));
-      if (winRef.current === "24h") setSummary(e.summary);
+      const plain = togglesRef.current.countEth && togglesRef.current.countToken;
+      if (winRef.current === "24h" && plain) setSummary(e.summary);
       else if (Date.now() - lastFetchRef.current > REFETCH_MIN_MS) void fetchSummary(winRef.current);
     });
     return () => es.close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const s = summary;
   const total = s?.totalTx ?? 0;
+  const excluding = !state.countEth || !state.countToken;
+  const visibleTxs = txs.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken)).slice(0, TICKER_MAX);
 
   return (
     <section className="card live">
@@ -150,7 +183,7 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
               <div className="hero">
                 <div className="heroNum">{fmtPct(signablePct(s.buckets, total, state.countEth, state.countToken))}</div>
                 <div className="heroLabel">
-                  of the last {win} clear-signable
+                  of {excluding ? "contract calls" : "transactions"} in the last {win} clear-signable
                   {s.blocks < (s.window.hours * 300) && (
                     <span className="muted"> · {fmtInt(s.blocks)} blocks so far</span>
                   )}
@@ -160,16 +193,33 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
                   <Toggle
                     on={state.countEth}
                     onClick={() => state.setCountEth(!state.countEth)}
-                    label={`ETH transfers ${fmtPct(total ? (s.buckets.eth_transfer / total) * 100 : 0)}`}
+                    label={`Include ETH transfers · ${fmtPct(s.allTx ? (s.native.ethTransfers / s.allTx) * 100 : 0)}`}
                     swatch="#38bdf8"
                   />
                   <Toggle
                     on={state.countToken}
                     onClick={() => state.setCountToken(!state.countToken)}
-                    label={`Token transfers ${fmtPct(total ? (s.buckets.token_native / total) * 100 : 0)}`}
+                    label={`Include token transfers · ${fmtPct(s.allTx ? (s.native.tokenTransfers / s.allTx) * 100 : 0)}`}
                     swatch="#818cf8"
                   />
                 </div>
+                {excluding && (
+                  <div className="disclaimer small">
+                    Excluding{" "}
+                    <b>
+                      {[
+                        !state.countEth && `${fmtInt(s.excluded.ethTransfers)} ETH transfers`,
+                        !state.countToken && `${fmtInt(s.excluded.tokenTransfers)} token transfers / approvals`,
+                      ]
+                        .filter(Boolean)
+                        .join(" and ")}
+                    </b>
+                    , {fmtPct(s.allTx ? ((s.excluded.ethTransfers + s.excluded.tokenTransfers) / s.allTx) * 100 : 0)} of
+                    the {fmtInt(s.allTx)} transactions in this window. The percentage, the ranking, and the list below
+                    cover only the other <b>{fmtInt(s.totalTx)}</b> transactions: the calls that need a descriptor.
+                    {!state.countToken && " Token transfers to tokens that have a descriptor (for example Tether) are excluded too."}
+                  </div>
+                )}
                 <div className="small practiceLine">
                   Library renders{" "}
                   <b style={{ color: STATUS_COLOR.pass }}>{fmtPct(s.practice.practicePct)}</b> of covered txs ·{" "}
@@ -191,7 +241,10 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
                   </div>
                 </div>
                 <div className="denoms">
-                  <Stat label={`Transactions, last ${win}`} value={fmtInt(total)} />
+                  <Stat
+                    label={excluding ? `Contract calls counted, last ${win}` : `Transactions, last ${win}`}
+                    value={fmtInt(total)}
+                  />
                   <Stat label="Blocks" value={fmtInt(s.blocks)} />
                   <Stat label="Uncovered contracts" value={fmtInt(s.ranking.totalContracts)} />
                 </div>
@@ -204,9 +257,16 @@ export function LivePanel({ state, onInspect }: { state: ToggleState; onInspect:
 
             <div className="tickerHead muted small">
               Newest transactions — click one to see it clear-signed
+              {excluding && (
+                <span>
+                  {" "}
+                  · {[!state.countEth && "ETH transfers", !state.countToken && "token transfers"].filter(Boolean).join(" and ")}{" "}
+                  hidden
+                </span>
+              )}
             </div>
             <div className="ticker">
-              {txs.map((t) => (
+              {visibleTxs.map((t) => (
                 <TickerRow
                   key={t.hash}
                   tx={t}

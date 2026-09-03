@@ -59,4 +59,5 @@ function migrateAddedColumns(db: Db): void {
 export * from "./write.js";
 export * from "./read.js";
 export * from "./ranking.js";
+export * from "./selectors.js";
 export * from "./live.js";

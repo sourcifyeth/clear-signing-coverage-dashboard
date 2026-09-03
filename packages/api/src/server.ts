@@ -125,6 +125,16 @@ app.get("/api/live/latest", (_req, res) => {
   res.json({ latest: latestBlock(db), blocks: liveBlockCount(db) });
 });
 
+/**
+ * `?exclude=eth,token` leaves wallet-native transactions out of a query:
+ * `eth` = plain ETH sends, `token` = standard ERC-20/721 transfer and approval
+ * calls, whether or not the token has a descriptor.
+ */
+function excludeQuery(q: unknown): { excludeEth: boolean; excludeToken: boolean } {
+  const parts = typeof q === "string" ? q.split(",").map((s) => s.trim()) : [];
+  return { excludeEth: parts.includes("eth"), excludeToken: parts.includes("token") };
+}
+
 app.get("/api/live/summary", (req, res) => {
   const w = String(req.query.window ?? "24h");
   const hours = WINDOWS[w];
@@ -134,6 +144,7 @@ app.get("/api/live/summary", (req, res) => {
     liveSummary(db, hours, {
       limit: intQuery(req.query.limit, 200),
       curvePoints: intQuery(req.query.curve, 500),
+      ...excludeQuery(req.query.exclude),
     }),
   );
 });
@@ -147,6 +158,7 @@ app.get("/api/live/recent", (req, res) => {
       limit: intQuery(req.query.limit, 100),
       bucket,
       sinceBlock: Number.isFinite(since) ? since : undefined,
+      ...excludeQuery(req.query.exclude),
     }),
   );
 });

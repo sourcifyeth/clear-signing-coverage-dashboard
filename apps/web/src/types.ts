@@ -80,7 +80,15 @@ export interface LiveSummary {
   blocks: number;
   firstBlock: number | null;
   lastBlock: number | null;
+  /** transactions the numbers are computed over, after exclusions */
   totalTx: number;
+  /** every transaction in the window, before exclusions */
+  allTx: number;
+  filter: { excludeEth: boolean; excludeToken: boolean };
+  /** wallet-native counts, always measured */
+  native: { ethTransfers: number; tokenTransfers: number };
+  /** the part of `native` removed from totalTx by the filter */
+  excluded: { ethTransfers: number; tokenTransfers: number };
   buckets: Buckets;
   headline: {
     theoryPctOfAll: number;

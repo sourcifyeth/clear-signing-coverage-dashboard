@@ -22,9 +22,32 @@ export const fmtInt = (n: number) => n.toLocaleString("en-US");
 export const fmtPct = (n: number) => `${n.toFixed(1)}%`;
 export const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
-/** Clear-signable share with the wallet-native buckets toggled in or out. */
+/**
+ * Clear-signable share. A wallet-native bucket that is toggled off is left out
+ * of the denominator as well, so "off" means "not part of the question", not
+ * "counted as unsignable".
+ */
 export function signablePct(b: Buckets, total: number, countEth: boolean, countToken: boolean): number {
-  if (!total) return 0;
+  const denom = total - (countEth ? 0 : b.eth_transfer) - (countToken ? 0 : b.token_native);
+  if (denom <= 0) return 0;
   const n = b.covered_theory + (countEth ? b.eth_transfer : 0) + (countToken ? b.token_native : 0);
-  return (n / total) * 100;
+  return (n / denom) * 100;
+}
+
+/** Standard ERC-20/721 transfer and approval selectors (mirror of @ccd/db). */
+export const STANDARD_TOKEN_SELECTORS = new Set<string>([
+  "0xa9059cbb",
+  "0x23b872dd",
+  "0x095ea7b3",
+  "0x39509351",
+  "0xa457c2d7",
+  "0x42842e0e",
+  "0xb88d4fde",
+  "0xa22cb465",
+]);
+
+/** `?exclude=` value for the API from the two toggles ("" when nothing is excluded). */
+export function excludeParam(countEth: boolean, countToken: boolean): string {
+  const parts = [!countEth && "eth", !countToken && "token"].filter(Boolean);
+  return parts.length ? `&exclude=${parts.join(",")}` : "";
 }

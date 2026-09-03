@@ -13,7 +13,7 @@
  * the registry counts as covered, not merely native.
  */
 
-import { computeRanking } from "@ccd/db";
+import { computeRanking, STANDARD_TOKEN_SELECTORS } from "@ccd/db";
 import type { CoveredCalldata } from "@ccd/coverage";
 import type { TxGroup } from "./bq/aggregate.js";
 import { type CoverageLookup, key3 } from "./coverage/loadCoverageSet.js";
@@ -26,16 +26,8 @@ export type Bucket =
   | "not_covered";
 
 /** Standard ERC-20 / ERC-721 selectors that wallets can render without a descriptor. */
-export const STANDARD_TOKEN_SELECTORS = new Set<string>([
-  "0xa9059cbb", // transfer(address,uint256)
-  "0x23b872dd", // transferFrom(address,address,uint256)
-  "0x095ea7b3", // approve(address,uint256)
-  "0x39509351", // increaseAllowance(address,uint256)
-  "0xa457c2d7", // decreaseAllowance(address,uint256)
-  "0x42842e0e", // safeTransferFrom(address,address,uint256)
-  "0xb88d4fde", // safeTransferFrom(address,address,uint256,bytes)
-  "0xa22cb465", // setApprovalForAll(address,bool)
-]);
+// The list lives in @ccd/db so the API can exclude the same selectors in SQL.
+export { STANDARD_TOKEN_SELECTORS };
 
 export interface ClassifiedGroup extends TxGroup {
   chainId: number;

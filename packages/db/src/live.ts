@@ -10,6 +10,7 @@
 import type { Db } from "./index.js";
 import type { Bucket, PracticalStatus } from "./write.js";
 import { computeRanking, rankingCurve, pct, type RankedContract } from "./ranking.js";
+import { STANDARD_TOKEN_SELECTORS_SQL, excludeSql, type ExcludeOptions } from "./selectors.js";
 
 // ---------------------------------------------------------------------------
 // Write
@@ -191,7 +192,15 @@ export interface LiveSummary {
   blocks: number;
   firstBlock: number | null;
   lastBlock: number | null;
+  /** transactions the numbers below are computed over (after exclusions) */
   totalTx: number;
+  /** every transaction in the window, before exclusions */
+  allTx: number;
+  filter: { excludeEth: boolean; excludeToken: boolean };
+  /** wallet-native counts in the window, always measured: plain ETH sends, and standard token calls (covered or not) */
+  native: { ethTransfers: number; tokenTransfers: number };
+  /** the part of `native` the filter removed from totalTx */
+  excluded: { ethTransfers: number; tokenTransfers: number };
   buckets: Record<Bucket, number>;
   headline: {
     theoryPctOfAll: number;
@@ -224,12 +233,14 @@ const EMPTY_BUCKETS = (): Record<Bucket, number> => ({
 export function liveSummary(
   db: Db,
   windowHours: number,
-  opts: { limit?: number; curvePoints?: number } = {},
+  opts: { limit?: number; curvePoints?: number } & ExcludeOptions = {},
 ): LiveSummary {
   const latest = latestBlock(db);
   const toIso = latest?.timeIso ?? new Date().toISOString();
   const fromIso = new Date(new Date(toIso).getTime() - windowHours * 3_600_000).toISOString();
   const limit = Math.max(1, Math.min(opts.limit ?? 200, 5000));
+  const filter = { excludeEth: !!opts.excludeEth, excludeToken: !!opts.excludeToken };
+  const ex = excludeSql(filter);
 
   const range = db
     .prepare(
@@ -239,21 +250,38 @@ export function liveSummary(
 
   const buckets = EMPTY_BUCKETS();
   const practice = { passTx: 0, partialTx: 0, failedTx: 0, practicePct: 0 };
+  const native = { ethTransfers: 0, tokenTransfers: 0 };
   let notCovered: { toAddress: string; selector: string; txCount: number }[] = [];
 
   if (range.lo !== null && range.hi !== null) {
     // block_groups carries block_time, so the window is a range on the covering
-    // index with no join to blocks.
+    // index with no join to blocks. The exclusion clauses apply to every query
+    // here, so buckets, practice, and the ranking agree with each other.
     const bucketRows = db
       .prepare(
-        "SELECT bucket, SUM(tx_count) AS n FROM block_groups WHERE block_time >= ? AND block_time <= ? GROUP BY bucket",
+        `SELECT bucket, SUM(tx_count) AS n FROM block_groups WHERE block_time >= ? AND block_time <= ?${ex} GROUP BY bucket`,
       )
       .all(fromIso, toIso) as { bucket: Bucket; n: number }[];
     for (const r of bucketRows) if (r.bucket in buckets) buckets[r.bucket] = r.n;
 
+    native.ethTransfers = (
+      db
+        .prepare(
+          "SELECT COALESCE(SUM(tx_count), 0) AS n FROM block_groups WHERE block_time >= ? AND block_time <= ? AND bucket = 'eth_transfer'",
+        )
+        .get(fromIso, toIso) as { n: number }
+    ).n;
+    native.tokenTransfers = (
+      db
+        .prepare(
+          `SELECT COALESCE(SUM(tx_count), 0) AS n FROM block_groups WHERE block_time >= ? AND block_time <= ? AND selector IN (${STANDARD_TOKEN_SELECTORS_SQL})`,
+        )
+        .get(fromIso, toIso) as { n: number }
+    ).n;
+
     const statusRows = db
       .prepare(
-        "SELECT status, SUM(tx_count) AS n FROM block_groups WHERE block_time >= ? AND block_time <= ? AND bucket = 'covered_theory' GROUP BY status",
+        `SELECT status, SUM(tx_count) AS n FROM block_groups WHERE block_time >= ? AND block_time <= ? AND bucket = 'covered_theory'${ex} GROUP BY status`,
       )
       .all(fromIso, toIso) as { status: string; n: number }[];
     for (const r of statusRows) {
@@ -268,14 +296,21 @@ export function liveSummary(
       db
         .prepare(
           `SELECT to_address, selector, SUM(tx_count) AS n FROM block_groups
-           WHERE block_time >= ? AND block_time <= ? AND bucket = 'not_covered'
+           WHERE block_time >= ? AND block_time <= ? AND bucket = 'not_covered'${ex}
            GROUP BY to_address, selector`,
         )
         .all(fromIso, toIso) as { to_address: string; selector: string; n: number }[]
     ).map((r) => ({ toAddress: r.to_address, selector: r.selector, txCount: r.n }));
   }
 
-  const totalTx = range.tx;
+  const allTx = range.tx;
+  const excluded = {
+    ethTransfers: filter.excludeEth ? native.ethTransfers : 0,
+    tokenTransfers: filter.excludeToken ? native.tokenTransfers : 0,
+  };
+  const totalTx = allTx - excluded.ethTransfers - excluded.tokenTransfers;
+  // With a bucket excluded its count is 0 here, so the ranking baseline shrinks
+  // to what is still counted (e.g. descriptors only).
   const ranking = computeRanking(notCovered, buckets, totalTx);
   const contractCalls = totalTx - buckets.eth_transfer - buckets.contract_creation;
 
@@ -285,6 +320,10 @@ export function liveSummary(
     firstBlock: range.lo,
     lastBlock: range.hi,
     totalTx,
+    allTx,
+    filter,
+    native,
+    excluded,
     buckets,
     headline: {
       theoryPctOfAll: pct(buckets.covered_theory, totalTx),
@@ -446,11 +485,11 @@ function toLiveTx(r: RawLiveTx): LiveTxOut {
 /** Most recent transactions, newest first. `sinceBlock` = strictly after that block. */
 export function recentTxs(
   db: Db,
-  opts: { limit?: number; bucket?: Bucket; sinceBlock?: number; chainId?: number } = {},
+  opts: { limit?: number; bucket?: Bucket; sinceBlock?: number; chainId?: number } & ExcludeOptions = {},
 ): LiveTxOut[] {
   const limit = Math.max(1, Math.min(opts.limit ?? 100, 1000));
   const chainId = opts.chainId ?? 1;
-  const where: string[] = [];
+  const where: string[] = ["1 = 1"];
   const params: unknown[] = [chainId];
   if (opts.bucket) {
     where.push("t.bucket = ?");
@@ -464,7 +503,7 @@ export function recentTxs(
   const rows = db
     .prepare(
       `${LIVE_TX_SELECT}
-       ${where.length ? "WHERE " + where.join(" AND ") : ""}
+       WHERE ${where.join(" AND ")}${excludeSql(opts, "t")}
        ORDER BY t.block_number DESC, t.rowid DESC
        LIMIT ?`,
     )

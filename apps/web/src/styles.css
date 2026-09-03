@@ -544,6 +544,19 @@ body {
   color: #cbd5e1;
   margin-top: 4px;
 }
+/* shown whenever ETH / token transfers are excluded from the numbers */
+.disclaimer {
+  margin: 4px 0 10px;
+  padding: 8px 12px;
+  border-left: 3px solid #fbbf24;
+  background: rgba(251, 191, 36, 0.08);
+  border-radius: 0 8px 8px 0;
+  color: #fde68a;
+  line-height: 1.45;
+}
+.disclaimer b {
+  color: #fef3c7;
+}
 .liveBar {
   margin-bottom: 16px;
 }

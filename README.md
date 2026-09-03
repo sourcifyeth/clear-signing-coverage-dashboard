@@ -162,6 +162,15 @@ Live endpoints on the API:
 The window in `summary` ends at the latest processed block, not at wall-clock
 now, so a stopped follower still reports its last complete window.
 
+`summary` and `recent` accept `exclude=eth,token`. `eth` drops plain ETH sends;
+`token` drops every call whose selector is a standard ERC-20/721 transfer or
+approval, whether or not the token has a descriptor (so Tether transfers go
+too). Excluded transactions leave the denominator as well as the numerator:
+`totalTx` shrinks, the ranking baseline shrinks, and `excluded` / `allTx` say
+what was removed. The dashboard excludes both by default and shows a
+disclaimer, because the question it answers is about the calls that need a
+descriptor.
+
 Each row in `recent` carries `functionSig` and `displayText`. The signature
 comes from the registry descriptor for covered transactions, and from
 Sourcify's 4-byte database (`api.4byte.sourcify.dev`) for everything else. The

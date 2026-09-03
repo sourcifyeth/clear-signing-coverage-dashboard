@@ -19,8 +19,10 @@ import { fmtInt, fmtPct, short, signablePct } from "./buckets.ts";
 export function App() {
   const [report, setReport] = useState<Report | null | undefined>(undefined);
   const [practical, setPractical] = useState<PracticalReport | null>(null);
-  const [countEth, setCountEth] = useState(true);
-  const [countToken, setCountToken] = useState(true);
+  // Wallet-native transfers are excluded by default: the question the dashboard
+  // answers is about the calls that need a descriptor.
+  const [countEth, setCountEth] = useState(false);
+  const [countToken, setCountToken] = useState(false);
   const [seedHash, setSeedHash] = useState<string | undefined>(undefined);
 
   useEffect(() => {
@@ -137,25 +139,42 @@ function Snapshot({ report, state }: { report: Report; state: ToggleState }) {
       <section className="grid2">
         <div className="card hero">
           <div className="heroNum">{fmtPct(signablePct(b, total, state.countEth, state.countToken))}</div>
-          <div className="heroLabel">of transactions clear-signable</div>
+          <div className="heroLabel">
+            {state.countEth && state.countToken
+              ? "of transactions clear-signable"
+              : "of the remaining transactions clear-signable"}
+          </div>
           <div className="toggles">
             <Toggle on disabled label={`Descriptors ${fmtPct(r.headline.theoryPctOfAll)}`} swatch="#4ade80" />
             <Toggle
               on={state.countEth}
               onClick={() => state.setCountEth(!state.countEth)}
-              label={`ETH transfers ${fmtPct((b.eth_transfer / total) * 100)}`}
+              label={`Include ETH transfers · ${fmtPct((b.eth_transfer / total) * 100)}`}
               swatch="#38bdf8"
             />
             <Toggle
               on={state.countToken}
               onClick={() => state.setCountToken(!state.countToken)}
-              label={`Token transfers ${fmtPct((b.token_native / total) * 100)}`}
+              label={`Include token transfers · ${fmtPct((b.token_native / total) * 100)}`}
               swatch="#818cf8"
             />
           </div>
+          {(!state.countEth || !state.countToken) && (
+            <div className="disclaimer small">
+              Excluding{" "}
+              {[
+                !state.countEth && `${fmtInt(b.eth_transfer)} ETH transfers`,
+                !state.countToken && `${fmtInt(b.token_native)} token transfers / approvals`,
+              ]
+                .filter(Boolean)
+                .join(" and ")}{" "}
+              from the total. This snapshot excludes by bucket, so standard token calls
+              that already have a descriptor (for example Tether) stay counted.
+            </div>
+          )}
           <p className="muted small">
-            Toggle whether wallet-native cases (plain ETH sends, standard ERC-20/721
-            transfers and approvals) count toward the total.
+            A toggle that is off removes that kind of wallet-native transaction from
+            the question entirely, numerator and denominator alike.
           </p>
         </div>
 

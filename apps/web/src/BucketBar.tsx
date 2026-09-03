@@ -21,7 +21,7 @@ export function BucketBar({ buckets, total, legend = true }: { buckets: Buckets;
       </div>
       {legend && (
         <div className="legend">
-          {BUCKETS.map((bk) => (
+          {BUCKETS.filter((bk) => buckets[bk.key] > 0).map((bk) => (
             <div key={bk.key} className="legendItem">
               <span className="swatch" style={{ background: bk.color }} />
               {bk.label}
