@@ -9,7 +9,7 @@ import { isFieldGroup } from "@ethereum-sourcify/clear-signing";
 import type { DisplayModel, DisplayField } from "@ethereum-sourcify/clear-signing";
 import type { LiveTxDetail } from "./types.ts";
 import { fmtInt } from "./buckets.ts";
-import { canonicalSig, clip, CLIP_TEXT, contractName, contractUrl, iconFor, REGISTRY_REPO } from "./txMeta.ts";
+import { canonicalSig, clip, CLIP_TEXT, contractName, contractUrl, iconFor, REGISTRY_REPO, SDK_REPO } from "./txMeta.ts";
 import { RawTxSection } from "./RawTxSection.tsx";
 
 /** The reduced record stored when a DisplayModel exceeded the size cap. */
@@ -199,7 +199,7 @@ function Result({ row }: { row: LiveTxDetail }) {
 
   return (
     <section className="csCard">
-      <div className="csCardTitle">Clear-signed display</div>
+      <div className="csCardTitle">What a wallet can show</div>
       {body}
     </section>
   );
@@ -210,7 +210,10 @@ function DecodeView({ model }: { model: DisplayModel }) {
   return (
     <div className="decode">
       <div className="muted small">
-        What the wallet shows, as rendered by the Sourcify library when the block landed.
+        Rendered by the{" "}
+        <a href={SDK_REPO} target="_blank" rel="noreferrer">
+          Sourcify Clear-Signing SDK ↗
+        </a>
         {fieldWarnings > 0 && (
           <span className="fieldWarnCount">
             {" "}

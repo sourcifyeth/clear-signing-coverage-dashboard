@@ -16,7 +16,7 @@ import { TxModal } from "./TxModal.tsx";
 import { BlockModal } from "./BlockModal.tsx";
 import { BucketBar, Toggle, Stat, numOr } from "./BucketBar.tsx";
 import { fmtInt, fmtPct, short, signablePct } from "./buckets.ts";
-import { clip, contractUrl, REGISTRY_REPO } from "./txMeta.ts";
+import { clip, contractUrl, REGISTRY_REPO, SDK_REPO } from "./txMeta.ts";
 
 export function App() {
   const [report, setReport] = useState<Report | null | undefined>(undefined);
@@ -55,7 +55,7 @@ export function App() {
             <a href={REGISTRY_REPO} target="_blank" rel="noreferrer">
               ERC-7730 Registry ↗
             </a>
-            <a href="https://github.com/sourcifyeth/clear-signing" target="_blank" rel="noreferrer">
+            <a href={SDK_REPO} target="_blank" rel="noreferrer">
               Sourcify SDK ↗
             </a>
           </nav>

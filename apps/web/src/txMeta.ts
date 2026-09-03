@@ -98,6 +98,8 @@ export function iconFor(t: Pick<LiveTx, "bucket" | "status">): TxIcon {
 }
 
 export const REGISTRY_REPO = "https://github.com/ethereum/clear-signing-erc7730-registry";
+/** The Sourcify Clear-Signing SDK (`@ethereum-sourcify/clear-signing`), which renders the display models. */
+export const SDK_REPO = "https://github.com/sourcifyeth/clear-signing";
 
 /**
  * Where a contract address links to: Sourcify's repository page for it
