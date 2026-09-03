@@ -10,6 +10,7 @@ import type { DisplayModel, DisplayField } from "@ethereum-sourcify/clear-signin
 import type { LiveTxDetail } from "./types.ts";
 import { fmtInt } from "./buckets.ts";
 import { canonicalSig, clip, CLIP_TEXT, contractName, contractUrl, iconFor, REGISTRY_REPO } from "./txMeta.ts";
+import { RawTxSection } from "./RawTxSection.tsx";
 
 /** The reduced record stored when a DisplayModel exceeded the size cap. */
 interface TruncatedDisplay {
@@ -132,6 +133,7 @@ function TxBody({ row }: { row: LiveTxDetail }) {
       </div>
 
       <Result row={row} />
+      <RawTxSection hash={row.hash} descriptorPath={row.descriptorPath} />
     </>
   );
 }

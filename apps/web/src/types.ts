@@ -240,3 +240,20 @@ export interface Report {
     };
   };
 }
+
+/** /api/live/tx/:hash/raw — the transaction as the node has it, fetched on demand. */
+export interface RawTx {
+  hash: string;
+  from: string;
+  /** null for a contract creation */
+  to: string | null;
+  /** wei, decimal string */
+  value: string;
+  input: string;
+  nonce: number;
+  /** gas limit, decimal string */
+  gas: string;
+  /** EIP-2718 transaction type */
+  type: number;
+  blockNumber: number | null;
+}

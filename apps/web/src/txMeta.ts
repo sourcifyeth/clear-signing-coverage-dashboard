@@ -97,7 +97,7 @@ export function iconFor(t: Pick<LiveTx, "bucket" | "status">): TxIcon {
   }
 }
 
-export const REGISTRY_REPO = "https://github.com/LedgerHQ/clear-signing-erc7730-registry";
+export const REGISTRY_REPO = "https://github.com/ethereum/clear-signing-erc7730-registry";
 
 /**
  * Where a contract address links to: Sourcify's repository page for it
