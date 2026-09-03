@@ -1792,3 +1792,39 @@ footer {
   background: transparent;
   cursor: help;
 }
+
+/* warnings: room below each one, and an instant tooltip on the code chip (same look as the icon tips) */
+.fieldWarn {
+  padding-bottom: 6px;
+}
+.warnRow {
+  padding-bottom: 4px;
+}
+.warnCode {
+  position: relative;
+}
+.warnCode[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  width: max-content;
+  max-width: 320px;
+  background: var(--text);
+  color: #fff;
+  border-radius: 6px;
+  padding: 6px 9px;
+  font-size: 11px;
+  font-weight: 400;
+  font-family: var(--sans);
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
+  z-index: 5;
+}
+/* field warnings are right-aligned, so their tip hangs from the right edge instead */
+.fieldWarn .warnCode[data-tip]:hover::after {
+  left: auto;
+  right: 0;
+}
