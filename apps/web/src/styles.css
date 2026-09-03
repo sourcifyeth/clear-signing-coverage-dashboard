@@ -588,14 +588,17 @@ button {
   display: flex;
   gap: 6px;
 }
-/* sticky window selector: sits right under the top bar, above the cards */
-.winBar {
+/* sticky control row: what to count (left) and the time window (right).
+   Sits right under the top bar, above the cards; wraps to two lines when
+   narrow, toggles first. */
+.ctrlBar {
   position: sticky;
   top: calc(var(--topbar-h, 72px) + 8px);
   z-index: 15;
   display: flex;
   align-items: center;
-  gap: 14px;
+  justify-content: space-between;
+  gap: 10px 24px;
   flex-wrap: wrap;
   padding: 10px 16px;
   background: rgba(255, 255, 255, 0.92);
@@ -604,23 +607,33 @@ button {
   border-radius: 8px;
   box-shadow: 0 2px 6px rgba(17, 24, 39, 0.06), 0 8px 24px rgba(17, 24, 39, 0.1);
 }
-.winBar .winLabel {
+.ctrlBar .toggles {
+  margin-bottom: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ctrlBar .winGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+.ctrlBar .winLabel {
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-soft);
+  margin-right: 4px;
 }
-.winBar .chip {
+.ctrlBar .winGroup .chip {
   font-size: 14px;
   font-weight: 500;
   padding: 7px 18px;
 }
-.winBar .chip.on {
+.ctrlBar .winGroup .chip.on {
   box-shadow: 0 2px 8px rgba(43, 80, 170, 0.35);
-}
-.winBar .winHint {
-  margin-left: auto;
 }
 .liveEmpty {
   display: flex;

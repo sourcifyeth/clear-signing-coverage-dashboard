@@ -45,7 +45,12 @@ export function RankingPanel({
     if (userTriggered) onBusy?.(1);
     try {
       const r = await fetch(`/api/live/ranking?window=${win}&by=contract&limit=${size}&offset=${pg * size}${exclude}`);
-      if (r.ok) setData(await r.json());
+      if (r.ok) {
+        // An API older than the paging change returns neither `offset` nor
+        // `total`; keep the requested offset so ranks never turn into NaN.
+        const j = (await r.json()) as Partial<LiveRanking> & Pick<LiveRanking, "window" | "by" | "totalTx">;
+        setData({ ...j, offset: typeof j.offset === "number" ? j.offset : pg * size, limit: j.limit ?? size } as LiveRanking);
+      }
     } finally {
       setLoading(false);
       if (userTriggered) onBusy?.(-1);
@@ -72,10 +77,14 @@ export function RankingPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
-  const total = data?.total ?? 0;
-  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  // `total` is missing when the API predates paging: page blind, "Next" while the page is full.
+  const legacyApi = data !== null && typeof data.total !== "number";
+  const total = legacyApi ? null : (data?.total ?? 0);
+  const pageCount = total === null ? null : Math.max(1, Math.ceil(total / pageSize));
+  const rowCount = data?.contracts?.length ?? 0;
   const from = data ? data.offset + 1 : 0;
-  const to = data ? data.offset + (data.contracts?.length ?? 0) : 0;
+  const to = data ? data.offset + rowCount : 0;
+  const hasNext = pageCount === null ? rowCount >= pageSize : page + 1 < pageCount;
 
   return (
     <section className="card">
@@ -101,23 +110,21 @@ export function RankingPanel({
           <div className={loading ? "pageDim" : ""}>
             <ContractTable rows={data.contracts ?? []} offset={data.offset} />
           </div>
-          {total > 0 && (
+          {(rowCount > 0 || page > 0) && (
             <div className="pager">
               <span className="muted small">
-                {fmtInt(from)}–{fmtInt(to)} of {fmtInt(total)} contracts
+                {fmtInt(from)}–{fmtInt(to)}
+                {total !== null && <> of {fmtInt(total)} contracts</>}
               </span>
               <div className="pagerBtns">
                 <button className="chip" disabled={page === 0 || loading} onClick={() => setPage((p) => Math.max(0, p - 1))}>
                   ← Previous
                 </button>
                 <span className="muted small">
-                  page {fmtInt(page + 1)} / {fmtInt(pageCount)}
+                  page {fmtInt(page + 1)}
+                  {pageCount !== null && <> / {fmtInt(pageCount)}</>}
                 </span>
-                <button
-                  className="chip"
-                  disabled={page + 1 >= pageCount || loading}
-                  onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
-                >
+                <button className="chip" disabled={!hasNext || loading} onClick={() => setPage((p) => p + 1)}>
                   Next →
                 </button>
               </div>
@@ -137,6 +144,11 @@ export function RankingPanel({
                   ))}
                 </select>
               </label>
+            </div>
+          )}
+          {legacyApi && (
+            <div className="muted small" style={{ marginTop: 6 }}>
+              API is older than the web app; restart <code>npm run api</code> for full paging.
             </div>
           )}
         </>

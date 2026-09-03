@@ -18,10 +18,9 @@ import { clip, CLIP_TEXT, fnName, iconFor, who } from "./txMeta.ts";
 
 type Win = "1h" | "24h" | "7d";
 const WINDOWS: Win[] = ["1h", "24h", "7d"];
-const WINDOW_LABEL: Record<Win, string> = { "1h": "Last hour", "24h": "Last 24 hours", "7d": "Last 7 days" };
 
 /**
- * Keep `--topbar-h` equal to the sticky top bar's height, so the window bar
+ * Keep `--topbar-h` equal to the sticky top bar's height, so the control row
  * can stick right under it whatever the bar's wrapped height is.
  */
 function useTopbarHeight(): void {
@@ -258,17 +257,41 @@ export function LivePanel({
           </div>
         </div>
       )}
-      {/* The window drives every number on the page, so it stays in view. */}
-      <div className="winBar" role="group" aria-label="Time window">
-        <span className="winLabel">Window</span>
-        <div className="winSel">
+      {/* Every number on the page follows these controls, so the row stays in view. */}
+      <div className="ctrlBar">
+        <div className="toggles" role="group" aria-label="What to count">
+          {s ? (
+            <>
+              {/* static chip: the descriptor-covered calls in this window, under the current toggles */}
+              <span className="toggle chip" title="Calls covered by an ERC-7730 descriptor in this window">
+                <span className="swatch" style={{ background: "#4ade80" }} />
+                Descriptor calls · {fmtInt(s.buckets.covered_theory)}
+              </span>
+              <Toggle
+                on={state.countEth}
+                onClick={() => state.setCountEth(!state.countEth)}
+                label={`Include ETH transfers · ${fmtInt(s.native.ethTransfers)}`}
+                swatch="#a9bdee"
+              />
+              <Toggle
+                on={state.countToken}
+                onClick={() => state.setCountToken(!state.countToken)}
+                label={`Include token transfers / approvals · ${fmtInt(s.native.tokenTransfers)}`}
+                swatch="#7693da"
+              />
+            </>
+          ) : (
+            <span className="toggle chip muted">Loading…</span>
+          )}
+        </div>
+        <div className="winGroup" role="group" aria-label="Time window">
+          <span className="winLabel">Window</span>
           {WINDOWS.map((w) => (
             <button key={w} className={`chip ${win === w ? "on" : ""}`} onClick={() => setWin(w)} aria-pressed={win === w}>
-              {WINDOW_LABEL[w]}
+              {w}
             </button>
           ))}
         </div>
-        <span className="winHint muted small">applies to every number on this page</span>
       </div>
       <section className="card live">
         <div className="liveHead">
@@ -307,25 +330,6 @@ export function LivePanel({
                     {s.blocks < s.window.hours * 300 && (
                       <span className="muted"> · {fmtInt(s.blocks)} blocks so far</span>
                     )}
-                  </div>
-                  <div className="toggles">
-                    {/* static chip: the descriptor-covered calls in this window, under the current toggles */}
-                    <span className="toggle chip" title="Calls covered by an ERC-7730 descriptor in this window">
-                      <span className="swatch" style={{ background: "#4ade80" }} />
-                      Descriptor calls · {fmtInt(s.buckets.covered_theory)}
-                    </span>
-                    <Toggle
-                      on={state.countEth}
-                      onClick={() => state.setCountEth(!state.countEth)}
-                      label={`Include ETH transfers · ${fmtInt(s.native.ethTransfers)}`}
-                      swatch="#a9bdee"
-                    />
-                    <Toggle
-                      on={state.countToken}
-                      onClick={() => state.setCountToken(!state.countToken)}
-                      label={`Include token transfers / approvals · ${fmtInt(s.native.tokenTransfers)}`}
-                      swatch="#7693da"
-                    />
                   </div>
                   {excluding && (
                     <div className="disclaimer small">
