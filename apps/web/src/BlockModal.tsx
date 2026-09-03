@@ -17,6 +17,11 @@ function hidden(t: LiveTx, countEth: boolean, countToken: boolean): boolean {
   return false;
 }
 
+/** "call" / "calls" after a stat number, in a lighter style. */
+function Unit({ n }: { n: number }) {
+  return <span className="statUnit">{n === 1 ? "call" : "calls"}</span>;
+}
+
 /** A row with its position in the block (the follower stores rows in block order). */
 type IndexedTx = { tx: LiveTx; index: number };
 
@@ -147,21 +152,27 @@ function Body({
       <div className="blockStats">
         <div className="blockStat">
           <div className="statVal" style={{ color: COLOR.okText }}>
-            {fmtInt(split.signable)} <span className="muted">/ {fmtInt(split.counted)}</span>
+            {fmtInt(split.signable)} <span className="muted">/ {fmtInt(split.counted)}</span> <Unit n={split.counted} />
           </div>
           <div className="statLbl muted">{excluding ? "counted calls" : "transactions"} clear-signable · {fmtPct(split.pct)}</div>
         </div>
         <div className="blockStat">
-          <div className="statVal">{fmtInt(stat.coveredOther)}</div>
+          <div className="statVal">
+            {fmtInt(stat.coveredOther)} <Unit n={stat.coveredOther} />
+          </div>
           <div className="statLbl muted">covered by a descriptor</div>
         </div>
         <div className="blockStat">
-          <div className="statVal">{fmtInt(stat.notCovered)}</div>
+          <div className="statVal">
+            {fmtInt(stat.notCovered)} <Unit n={stat.notCovered} />
+          </div>
           <div className="statLbl muted">not covered</div>
         </div>
         <div className="blockStat">
-          <div className="statVal">{fmtInt(stat.tokenStd + stat.eth)}</div>
-          <div className="statLbl muted">wallet-native (token + ETH)</div>
+          <div className="statVal">
+            {fmtInt(stat.tokenStd + stat.eth)} <Unit n={stat.tokenStd + stat.eth} />
+          </div>
+          <div className="statLbl muted">wallet-native (token or ETH transfer)</div>
         </div>
       </div>
 

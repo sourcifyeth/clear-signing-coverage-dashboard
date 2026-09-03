@@ -1445,3 +1445,120 @@ footer {
   font-size: 15px;
   vertical-align: -1px;
 }
+
+/* ---------------------------------------------------------------------------
+   transaction modal: raw transaction section (calldata on demand + ABI decode) */
+.rawSection {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.rawHead {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-soft);
+  margin-bottom: 8px;
+}
+.rawRows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+.rawRows .metaRow {
+  align-items: start;
+}
+.rawError {
+  color: var(--amber-text);
+}
+.hexBox {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  color: var(--text-soft);
+  line-height: 1.5;
+}
+.hexBox .linkBtn {
+  font-size: 12px;
+}
+/* small two-option switch: same look as the window pills, smaller */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 2px;
+  background: #fff;
+  margin-bottom: 6px;
+}
+.seg {
+  border: none;
+  background: transparent;
+  color: var(--text-soft);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.seg:hover:not(.on) {
+  color: var(--blue);
+}
+.seg.on {
+  background: var(--blue);
+  color: #fff;
+}
+/* decoded arguments */
+.decoded {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.decodedSig {
+  color: var(--blue-700);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.args,
+.argNested {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.argNested {
+  border-left: 2px solid var(--border);
+  padding-left: 10px;
+  margin-top: 2px;
+}
+.argRow {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.argName {
+  color: var(--muted);
+  font-size: 12px;
+}
+.argType {
+  color: var(--faint);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+.argScalar {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.decodedSource {
+  margin-top: 2px;
+}
+
+/* block modal stat boxes: "calls" unit after the number */
+.blockStat .statVal .statUnit {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--muted);
+}
