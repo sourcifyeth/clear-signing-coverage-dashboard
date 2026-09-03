@@ -1727,3 +1727,15 @@ footer {
   line-height: 1.4;
   margin-top: 2px;
 }
+
+/* calldata toggle row: the "Decoded with …" note sits beside the switch */
+.segRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.segNote {
+  font-size: 12px;
+}

@@ -184,6 +184,7 @@ export function DecodedCalldata({
   input,
   descriptorPath,
   functionSig,
+  onSource,
 }: {
   chainId: number;
   address: string;
@@ -191,16 +192,24 @@ export function DecodedCalldata({
   descriptorPath: string | null;
   /** the row's known signature, tried before asking 4byte */
   functionSig: string | null;
+  /** tells the parent which source decoded it ("Decoded with …"), or null while loading / on failure */
+  onSource?: (note: string | null) => void;
 }) {
   const [status, setStatus] = useState<Status>({ kind: "loading" });
 
   useEffect(() => {
     let cancelled = false;
     setStatus({ kind: "loading" });
-    void decodeCalldata(chainId, address, input, descriptorPath, functionSig).then((s) => !cancelled && setStatus(s));
+    onSource?.(null);
+    void decodeCalldata(chainId, address, input, descriptorPath, functionSig).then((s) => {
+      if (cancelled) return;
+      setStatus(s);
+      onSource?.(s.kind === "decoded" ? SOURCE_NOTE[s.source] : null);
+    });
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onSource is a setter; identity changes must not re-decode
   }, [chainId, address, input, descriptorPath, functionSig]);
 
   if (status.kind === "loading") return <div className="muted small">Decoding…</div>;
@@ -213,7 +222,6 @@ export function DecodedCalldata({
 
   return (
     <div className="decoded">
-      <div className="muted small decodedSource">{SOURCE_NOTE[status.source]}</div>
       <div className="decodedSig mono">{signatureOf(status.fn)}</div>
       {status.fn.inputs.length > 0 && (
         <div className="args">

@@ -69,6 +69,8 @@ async function loadRaw(hash: string): Promise<Load> {
 export function RawTxSection({ hash, descriptorPath, functionSig }: { hash: string; descriptorPath: string | null; functionSig: string | null }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [mode, setMode] = useState<CalldataMode>(loadMode);
+  /** "Decoded with …" from the decoder, shown next to the toggle */
+  const [sourceNote, setSourceNote] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,7 +91,9 @@ export function RawTxSection({ hash, descriptorPath, functionSig }: { hash: stri
       <div className="rawHead">Raw transaction</div>
       {load.kind === "loading" && <div className="muted small">Loading from the node…</div>}
       {load.kind === "error" && <div className="muted small rawError">{load.message}</div>}
-      {load.kind === "ok" && <RawRows tx={load.tx} descriptorPath={descriptorPath} functionSig={functionSig} mode={mode} onMode={pick} />}
+      {load.kind === "ok" && (
+        <RawRows tx={load.tx} descriptorPath={descriptorPath} functionSig={functionSig} mode={mode} onMode={pick} sourceNote={sourceNote} onSource={setSourceNote} />
+      )}
     </div>
   );
 }
@@ -100,12 +104,16 @@ function RawRows({
   functionSig,
   mode,
   onMode,
+  sourceNote,
+  onSource,
 }: {
   tx: RawTx;
   descriptorPath: string | null;
   functionSig: string | null;
   mode: CalldataMode;
   onMode: (m: CalldataMode) => void;
+  sourceNote: string | null;
+  onSource: (note: string | null) => void;
 }) {
   const isCall = tx.to !== null && tx.input.length >= 10;
   const bytes = (tx.input.length - 2) / 2;
@@ -137,23 +145,33 @@ function RawRows({
         <span className="muted">Calldata</span>
         <span>
           {isCall && (
-            <div className="segmented" role="tablist" aria-label="calldata view">
-              <button type="button" role="tab" aria-selected={mode === "hex"} className={`seg ${mode === "hex" ? "on" : ""}`} onClick={() => onMode("hex")}>
-                Raw
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === "decoded"}
-                className={`seg ${mode === "decoded" ? "on" : ""}`}
-                onClick={() => onMode("decoded")}
-              >
-                Decoded
-              </button>
+            <div className="segRow">
+              <div className="segmented" role="tablist" aria-label="calldata view">
+                <button type="button" role="tab" aria-selected={mode === "hex"} className={`seg ${mode === "hex" ? "on" : ""}`} onClick={() => onMode("hex")}>
+                  Raw
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === "decoded"}
+                  className={`seg ${mode === "decoded" ? "on" : ""}`}
+                  onClick={() => onMode("decoded")}
+                >
+                  Decoded
+                </button>
+              </div>
+              {showDecoded && sourceNote && <span className="muted small segNote">{sourceNote}</span>}
             </div>
           )}
           {showDecoded ? (
-            <DecodedCalldata chainId={CHAIN_ID} address={tx.to as string} input={tx.input} descriptorPath={descriptorPath} functionSig={functionSig} />
+            <DecodedCalldata
+              chainId={CHAIN_ID}
+              address={tx.to as string}
+              input={tx.input}
+              descriptorPath={descriptorPath}
+              functionSig={functionSig}
+              onSource={onSource}
+            />
           ) : tx.input === "0x" ? (
             <span className="muted">none (0x)</span>
           ) : (
