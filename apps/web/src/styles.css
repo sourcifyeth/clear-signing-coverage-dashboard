@@ -1640,3 +1640,18 @@ footer {
   color: var(--muted);
   margin-bottom: 8px;
 }
+
+/* raw calldata: full hex in a scrollable box instead of a truncated preview */
+.hexBox {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  font-size: 12px;
+}
+/* decoded calldata: the source note sits above the content */
+.decodedSource {
+  margin: 0 0 6px;
+}

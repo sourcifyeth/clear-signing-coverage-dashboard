@@ -126,9 +126,25 @@ function membersOf(value: unknown, param: ParamLike): { label: string; param: Pa
   return undefined;
 }
 
+/** Scalars longer than this (long `bytes`, big strings) start collapsed with a "Show full" link. */
+const SCALAR_PREVIEW = 200;
+
+function LongScalar({ text }: { text: string }) {
+  const [full, setFull] = useState(false);
+  if (text.length <= SCALAR_PREVIEW) return <span className="argScalar">{text}</span>;
+  return (
+    <span className="argScalar">
+      {full ? text : `${text.slice(0, SCALAR_PREVIEW)}…`}{" "}
+      <button type="button" className="linkBtn small" onClick={() => setFull(!full)}>
+        {full ? "Show less" : `Show full (${text.length.toLocaleString()} chars)`}
+      </button>
+    </span>
+  );
+}
+
 function Value({ value, param }: { value: unknown; param: ParamLike }) {
   const members = membersOf(value, param);
-  if (!members) return <span className="argScalar">{scalarToString(value)}</span>;
+  if (!members) return <LongScalar text={scalarToString(value)} />;
   if (members.length === 0) return <span className="muted">[]</span>;
   return (
     <div className="argNested">
@@ -186,6 +202,7 @@ export function DecodedCalldata({
 
   return (
     <div className="decoded">
+      <div className="muted small decodedSource">{SOURCE_NOTE[status.source]}</div>
       <div className="decodedSig mono">{signatureOf(status.fn)}</div>
       {status.fn.inputs.length > 0 && (
         <div className="args">
@@ -199,7 +216,6 @@ export function DecodedCalldata({
           ))}
         </div>
       )}
-      <div className="muted small decodedSource">{SOURCE_NOTE[status.source]}</div>
     </div>
   );
 }
