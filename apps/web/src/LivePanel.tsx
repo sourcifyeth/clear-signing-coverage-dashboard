@@ -221,11 +221,11 @@ export function LivePanel({
           </h3>
           {latest && (
             <div className="liveBlock mono small">
-              block{" "}
+              latest block{" "}
               <a href={`https://etherscan.io/block/${latest.number}`} target="_blank" rel="noreferrer">
                 {fmtInt(latest.number)}
               </a>{" "}
-              · {ago(latest.timeIso, now)} · {latest.txCount} txs
+              with {fmtInt(latest.txCount)} txs · {ago(latest.timeIso, now)}
             </div>
           )}
           <div className="winSel">
