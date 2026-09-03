@@ -1426,3 +1426,11 @@ footer {
     grid-template-columns: 52px 26px 1fr 1fr;
   }
 }
+
+/* small link next to a modal title (e.g. "Explorer ↗" after the tx hash) */
+.modalTitle .titleLink {
+  font-size: 13px;
+  font-weight: 400;
+  margin-left: 4px;
+  vertical-align: middle;
+}
