@@ -21,6 +21,8 @@ const WINDOWS: Win[] = ["1h", "24h", "7d"];
 const TICKER_MAX = 100;
 /** raw rows kept; the visible list is this minus whatever the toggles hide */
 const TICKER_RAW_MAX = 400;
+/** rows that can wait in the banner before the oldest are dropped (a block has ~100–300 rows) */
+const PENDING_MAX = 3000;
 const STRIP_BLOCKS = 60;
 /** min ms between summary refetches when the SSE summary does not apply (other window, or an exclusion is on) */
 const REFETCH_MIN_MS = 10_000;
@@ -75,6 +77,8 @@ export function LivePanel({
   const [txs, setTxs] = useState<LiveTx[]>([]);
   /** rows that arrived over the stream and are not shown yet */
   const [pending, setPending] = useState<LiveTx[]>([]);
+  /** every block that landed since the list was last rendered, as a range (kept even when rows are dropped) */
+  const [pendingRange, setPendingRange] = useState<{ lo: number; hi: number } | null>(null);
   const [blocks, setBlocks] = useState<BlockStat[]>([]);
   const [connected, setConnected] = useState(false);
   /** user-triggered refetches in flight (window or toggle change); > 0 shows the page overlay */
@@ -109,6 +113,7 @@ export function LivePanel({
     shownRef.current = new Set(rows.map((t) => t.hash));
     setTxs(rows);
     setPending([]);
+    setPendingRange(null);
   }
 
   // Initial load.
@@ -172,7 +177,15 @@ export function LivePanel({
       const e = JSON.parse((ev as MessageEvent).data) as LiveBlockEvent;
       setLatest(e.block);
       onLatest?.(e.block);
-      setPending((prev) => mergeTxs(e.txs, prev));
+      setPending((prev) => mergeTxs(e.txs, prev, PENDING_MAX));
+      // Track the block range since the last render from the blocks the event
+      // announces, so it stays right even if rows are dropped from the buffer.
+      const nums = (e.blocks?.length ? e.blocks.map((b) => b.number) : []).concat(e.block.number);
+      setPendingRange((r) => {
+        const lo = Math.min(r?.lo ?? Infinity, ...nums);
+        const hi = Math.max(r?.hi ?? -Infinity, ...nums);
+        return { lo, hi };
+      });
       if (e.blocks?.length) setBlocks((prev) => mergeBlocks(prev, e.blocks));
       const plain = togglesRef.current.countEth && togglesRef.current.countToken;
       if (winRef.current === "24h" && plain) setSummary(e.summary);
@@ -193,6 +206,7 @@ export function LivePanel({
     revealRef.current = order;
     setTxs((prev) => mergeTxs(pending, prev));
     setPending([]);
+    setPendingRange(null);
     // Once the last row has landed, treat them as shown so nothing re-animates later.
     const settleMs = Math.min(order.size, 40) * 35 + 800;
     setTimeout(() => {
@@ -207,16 +221,14 @@ export function LivePanel({
   const visibleTxs = txs.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken)).slice(0, TICKER_MAX);
   const pendingShown = pending.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken));
   const pendingVisible = pendingShown.length;
-  // "block N" or "blocks N to M" for the rows waiting in the banner
+  // "block N" or "blocks N to M": every block since the last render, not only
+  // the ones whose rows survive the toggles or the buffer cap.
   const pendingBlocks = (() => {
-    if (pendingShown.length === 0) return "";
-    let lo = Infinity;
-    let hi = -Infinity;
-    for (const t of pendingShown) {
-      if (t.blockNumber < lo) lo = t.blockNumber;
-      if (t.blockNumber > hi) hi = t.blockNumber;
-    }
-    return lo === hi ? `block ${fmtInt(lo)}` : `blocks ${fmtInt(lo)} to ${fmtInt(hi)}`;
+    const r = pendingRange;
+    if (!r) return "";
+    if (r.lo === r.hi) return `block ${fmtInt(r.lo)}`;
+    const n = r.hi - r.lo + 1;
+    return `blocks ${fmtInt(r.lo)} to ${fmtInt(r.hi)}, ${n} blocks`;
   })();
 
   return (
