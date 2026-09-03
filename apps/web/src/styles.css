@@ -1962,3 +1962,49 @@ footer {
 .verifyBadge.no {
   line-height: 1;
 }
+
+/* copy-to-clipboard icon button (tx hash in the modal title) */
+.copyBtn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin-left: 2px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.copyBtn:hover {
+  color: var(--blue);
+  border-color: var(--border);
+  background: var(--bg);
+}
+.copyBtn.done {
+  color: #16a34a;
+}
+.copyBtn[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 5px);
+  transform: translateX(-50%);
+  background: var(--text);
+  color: #fff;
+  border-radius: 6px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-family: var(--sans);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+}

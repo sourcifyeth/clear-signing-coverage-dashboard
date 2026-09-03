@@ -14,6 +14,25 @@ import { RawTxSection } from "./RawTxSection.tsx";
 import { fetchProxyInfo, fetchVerification, type ProxyInfo, type Verification } from "./abi.ts";
 import { explainWarning } from "./warningExplainer.ts";
 
+/** Copies `text` to the clipboard; the icon flips to a check for a moment. */
+function CopyButton({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setDone(true);
+      setTimeout(() => setDone(false), 1200);
+    } catch {
+      /* clipboard blocked (insecure context or permission); nothing to do */
+    }
+  };
+  return (
+    <button type="button" className={`copyBtn ${done ? "done" : ""}`} onClick={copy} data-tip={done ? "Copied" : "Copy hash"} aria-label="Copy transaction hash">
+      {done ? "✓" : "⧉"}
+    </button>
+  );
+}
+
 /**
  * Verification badge next to the contract: the Sourcify mark (linking to the
  * repository page) when verified, a gray mark when not. Nothing while loading
@@ -208,7 +227,7 @@ function TxBody({ row }: { row: LiveTxDetail }) {
       <div className="modalHead">
         <div>
           <div className="modalTitle">
-            Transaction <span className="mono">{row.hash.slice(0, 10)}…{row.hash.slice(-6)}</span>{" "}
+            Transaction <span className="mono">{row.hash.slice(0, 10)}…{row.hash.slice(-6)}</span> <CopyButton text={row.hash} />{" "}
             <a className="small titleLink" href={`https://etherscan.io/tx/${row.hash}`} target="_blank" rel="noreferrer" title={row.hash}>
               Explorer ↗
             </a>
