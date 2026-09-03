@@ -12,6 +12,7 @@ import { fmtInt } from "./buckets.ts";
 import { canonicalSig, clip, CLIP_TEXT, contractName, contractUrl, iconFor, REGISTRY_REPO, SDK_REPO } from "./txMeta.ts";
 import { RawTxSection } from "./RawTxSection.tsx";
 import { fetchProxyInfo, type ProxyInfo } from "./abi.ts";
+import { explainWarning } from "./warningExplainer.ts";
 
 /**
  * Info banner when Sourcify says the target contract is a proxy: the proxy
@@ -338,7 +339,10 @@ function FieldWarning({ warning }: { warning?: { code: string; message: string }
   if (!warning) return null;
   return (
     <div className="fieldWarn small">
-      <span className="mono warnCode">{warning.code}</span> {warning.message}
+      <span className="mono warnCode" title={explainWarning(warning.code)}>
+        {warning.code}
+      </span>{" "}
+      {warning.message}
     </div>
   );
 }
@@ -384,7 +388,10 @@ function WarningList({ warnings }: { warnings: DisplayModel["warnings"] }) {
     <div className="warnings">
       {warnings.map((w, i) => (
         <div key={i} className="warnRow small">
-          <span className="mono warnCode">{w.code}</span> {w.message}
+          <span className="mono warnCode" title={explainWarning(String(w.code))}>
+            {w.code}
+          </span>{" "}
+          {w.message}
         </div>
       ))}
     </div>

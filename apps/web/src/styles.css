@@ -1780,3 +1780,15 @@ footer {
   border-color: var(--blue);
   color: var(--blue);
 }
+
+/* warnings: no yellow fill; the code chip is outlined only and explains itself on hover */
+.fieldRow.warned {
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  border-bottom-color: var(--border);
+}
+.warnCode {
+  background: transparent;
+  cursor: help;
+}
