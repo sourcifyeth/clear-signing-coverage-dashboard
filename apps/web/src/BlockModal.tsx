@@ -138,7 +138,7 @@ function Body({
           <div className="muted small">
             {when} · {fmtInt(block.txCount)} transactions ·{" "}
             <a href={`https://etherscan.io/block/${block.number}`} target="_blank" rel="noreferrer" title={`block hash ${block.hash}`}>
-              Etherscan ↗
+              Explorer ↗
             </a>
           </div>
         </div>
