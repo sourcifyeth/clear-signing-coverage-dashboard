@@ -245,7 +245,7 @@ button {
   font-size: 60px;
   font-weight: 700;
   line-height: 1;
-  color: var(--green-700);
+  color: var(--blue);
   letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
 }
