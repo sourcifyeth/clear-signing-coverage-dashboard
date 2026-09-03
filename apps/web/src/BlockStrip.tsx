@@ -7,7 +7,7 @@
  * of transaction is left out of the block's denominator.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { BlockStat } from "./types.ts";
 import { COLOR, fmtInt, fmtPct } from "./buckets.ts";
 
@@ -37,6 +37,9 @@ export function BlockStrip({
   onOpen?: (blockNumber: number) => void;
 }) {
   const [hover, setHover] = useState<number | null>(null);
+  /** highest block present at first render; anything newer arrived live and animates in */
+  const initialMax = useRef<number | null>(null);
+  if (blocks.length > 0 && initialMax.current === null) initialMax.current = blocks[blocks.length - 1].number;
   if (blocks.length === 0) return null;
 
   const last = blocks[blocks.length - 1];
@@ -48,7 +51,8 @@ export function BlockStrip({
   return (
     <div className="strip">
       <div className="stripHead">
-        <div>
+        {/* keyed by block so the headline re-mounts and flashes when a new block lands */}
+        <div key={last.number} className={last.number > (initialMax.current ?? Infinity) ? "stripHeadFresh" : ""}>
           <span className="stripNum" style={{ color: COLOR.okText }}>
             {fmtInt(lastSplit.signable)}
           </span>
@@ -68,10 +72,11 @@ export function BlockStrip({
         {blocks.map((b, i) => {
           const s = splitBlock(b, countEth, countToken);
           const isLast = i === blocks.length - 1;
+          const fresh = b.number > (initialMax.current ?? Infinity);
           return (
             <div
               key={b.number}
-              className={`stripCol ${isLast ? "last" : ""} ${hover === i ? "hover" : ""} ${onOpen ? "clickable" : ""}`}
+              className={`stripCol ${isLast ? "last" : ""} ${hover === i ? "hover" : ""} ${onOpen ? "clickable" : ""} ${fresh ? "fresh" : ""}`}
               onMouseEnter={() => setHover(i)}
               onClick={() => onOpen?.(b.number)}
               role={onOpen ? "button" : undefined}

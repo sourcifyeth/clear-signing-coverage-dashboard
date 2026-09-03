@@ -1214,3 +1214,61 @@ footer {
   color: var(--amber-text);
   font-weight: 600;
 }
+
+/* a block that lands live: the column slides in from the right, its green
+   share grows up from the baseline, and the outline pulses once */
+.stripCol.fresh {
+  animation: stripIn 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.stripCol.fresh .stripSig {
+  transform-origin: bottom;
+  animation: stripGrow 0.7s 0.15s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.stripCol.fresh.last {
+  animation: stripIn 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both, stripPulse 1.2s 0.3s ease-out 1;
+}
+@keyframes stripIn {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes stripGrow {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+@keyframes stripPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(43, 80, 170, 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 10px rgba(43, 80, 170, 0);
+  }
+}
+/* the headline re-mounts with each block and highlights briefly */
+.stripHeadFresh {
+  animation: headFlash 1s ease-out both;
+  border-radius: 4px;
+}
+@keyframes headFlash {
+  0% {
+    background: var(--green-bg);
+    box-shadow: 0 0 0 6px var(--green-bg);
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+/* other columns slide over smoothly when a new one pushes in */
+.stripCol {
+  transition: flex-basis 0.3s ease;
+}
