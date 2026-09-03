@@ -53,7 +53,7 @@ export function BlockStrip({
             {fmtInt(lastSplit.signable)}
           </span>
           <span className="muted"> of </span>
-          <span className="stripNum">{fmtInt(lastSplit.counted)}</span>
+          <span className="stripNum muted">{fmtInt(lastSplit.counted)}</span>
           <span className="muted">
             {" "}
             {what} in the last block are clear-signable · <b>{fmtPct(lastSplit.pct)}</b>
