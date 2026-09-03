@@ -1623,3 +1623,20 @@ footer {
   font-weight: 400;
   opacity: 0.85;
 }
+
+/* tx modal: the clear-signed display, boxed */
+.csCard {
+  margin: 14px 0 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+}
+.csCardTitle {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}

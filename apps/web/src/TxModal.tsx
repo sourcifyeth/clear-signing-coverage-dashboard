@@ -4,7 +4,7 @@
  * clear-signed display model the Sourcify library produced.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { isFieldGroup } from "@ethereum-sourcify/clear-signing";
 import type { DisplayModel, DisplayField } from "@ethereum-sourcify/clear-signing";
 import type { LiveTxDetail } from "./types.ts";
@@ -176,41 +176,33 @@ function TxBody({ row }: { row: LiveTxDetail }) {
   );
 }
 
+/**
+ * The clear-signed section. Only covered calls have one; for every other
+ * kind the status banner already says everything.
+ */
 function Result({ row }: { row: LiveTxDetail }) {
-  if (row.bucket === "eth_transfer")
-    return <p className="modalNote">A plain ETH send. Wallets show the amount and the recipient natively; no descriptor is involved.</p>;
-  if (row.bucket === "contract_creation")
-    return <p className="modalNote">A contract deployment. There is nothing to clear-sign.</p>;
-  if (row.bucket === "token_native")
-    return (
-      <p className="modalNote">
-        A standard token transfer or approval. Wallets render it from the token's own metadata, so it
-        counts as clear-signable without a registry descriptor. The follower did not run the library on it.
-      </p>
-    );
-  if (row.bucket === "not_covered")
-    return (
-      <p className="modalNote warn">
-        No ERC-7730 descriptor covers this call, so a wallet shows raw calldata: the selector and the
-        ABI-encoded arguments as hex. Adding a descriptor for this contract would fix every transaction
-        like this one.
-      </p>
-    );
+  if (row.bucket !== "covered_theory") return null;
 
-  // covered_theory: show what the library produced
+  let body: ReactNode;
   if (row.display === null)
-    return <p className="modalNote">Covered by a descriptor, but the follower stored no display model for this row (it predates that column).</p>;
-  if (isTruncated(row.display)) {
+    body = <p className="modalNote">Covered by a descriptor, but the follower stored no display model for this row (it predates that column).</p>;
+  else if (isTruncated(row.display)) {
     const d = row.display;
-    return (
+    body = (
       <div className="decode">
         {d.interpolatedIntent && <div className="interp">{d.interpolatedIntent}</div>}
         <div className="muted small">The display model was too large to store in full ({d.fieldCount} fields).</div>
         <WarningList warnings={d.warnings as DisplayModel["warnings"]} />
       </div>
     );
-  }
-  return <DecodeView model={row.display as DisplayModel} />;
+  } else body = <DecodeView model={row.display as DisplayModel} />;
+
+  return (
+    <section className="csCard">
+      <div className="csCardTitle">Clear-signed display</div>
+      {body}
+    </section>
+  );
 }
 
 function DecodeView({ model }: { model: DisplayModel }) {
