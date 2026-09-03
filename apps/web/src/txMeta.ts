@@ -50,6 +50,12 @@ export function fnShort(sig: string | null): string | null {
 }
 
 /** Contract label for a row: entity from the registry, else a known label, else the short address. */
+/** A real name for the contract (registry entity or a known label), or null when we only have the address. */
+export function knownName(toAddress: string | null, entity: string | null): string | null {
+  if (entity) return entity;
+  return toAddress ? labelFor(toAddress) : null;
+}
+
 export function contractName(toAddress: string | null, entity: string | null): string {
   if (entity) return entity;
   if (!toAddress) return "?";

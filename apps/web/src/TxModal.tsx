@@ -9,7 +9,7 @@ import { isFieldGroup } from "@ethereum-sourcify/clear-signing";
 import type { DisplayModel, DisplayField } from "@ethereum-sourcify/clear-signing";
 import type { LiveTxDetail } from "./types.ts";
 import { fmtInt } from "./buckets.ts";
-import { canonicalSig, clip, CLIP_TEXT, contractName, contractUrl, iconFor, REGISTRY_REPO, SDK_REPO } from "./txMeta.ts";
+import { canonicalSig, clip, CLIP_TEXT, contractUrl, iconFor, knownName, REGISTRY_REPO, SDK_REPO } from "./txMeta.ts";
 import { RawTxSection } from "./RawTxSection.tsx";
 import { fetchProxyInfo, fetchVerification, type ProxyInfo, type Verification } from "./abi.ts";
 import { explainWarning } from "./warningExplainer.ts";
@@ -201,6 +201,7 @@ function bannerText(row: LiveTxDetail): { title: string; sub: string } {
 function TxBody({ row }: { row: LiveTxDetail }) {
   const icon = iconFor(row);
   const banner = bannerText(row);
+  const name = knownName(row.toAddress, row.entity);
   const sig = row.functionSig ? canonicalSig(row.functionSig) : null;
   return (
     <>
@@ -224,7 +225,11 @@ function TxBody({ row }: { row: LiveTxDetail }) {
           <span>
             {row.toAddress ? (
               <>
-                <b title={contractName(row.toAddress, row.entity)}>{clip(contractName(row.toAddress, row.entity))}</b>{" "}
+                {name && (
+                  <>
+                    <b title={name}>{clip(name)}</b>{" "}
+                  </>
+                )}
                 <span className="mono muted">{row.toAddress}</span> <VerifiedBadge address={row.toAddress} />
               </>
             ) : (
