@@ -172,9 +172,23 @@ export function LivePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** rows revealed by the last "show" click, in list order, so each can start its animation a bit later than the one above */
+  const revealRef = useRef<Map<string, number>>(new Map());
+
   function showPending() {
+    const order = new Map<string, number>();
+    pending
+      .filter((t) => !hiddenByToggles(t, togglesRef.current.countEth, togglesRef.current.countToken))
+      .forEach((t, i) => order.set(t.hash, i));
+    revealRef.current = order;
     setTxs((prev) => mergeTxs(pending, prev));
     setPending([]);
+    // Once the last row has landed, treat them as shown so nothing re-animates later.
+    const settleMs = Math.min(order.size, 40) * 35 + 800;
+    setTimeout(() => {
+      for (const h of order.keys()) shownRef.current?.add(h);
+      revealRef.current = new Map();
+    }, settleMs);
   }
 
   const s = summary;
@@ -313,6 +327,7 @@ export function LivePanel({
                     key={t.hash}
                     tx={t}
                     fresh={shownRef.current !== null && !shownRef.current.has(t.hash)}
+                    delayMs={Math.min(revealRef.current.get(t.hash) ?? 0, 40) * 35}
                     active={activeHash === t.hash}
                     onClick={() => {
                       setActiveHash(t.hash);
@@ -350,11 +365,14 @@ function TickerIcon({ tx: t }: { tx: LiveTx }) {
 function TickerRow({
   tx: t,
   fresh,
+  delayMs = 0,
   active,
   onClick,
 }: {
   tx: LiveTx;
   fresh: boolean;
+  /** stagger for rows revealed together: each starts its entry animation this much later */
+  delayMs?: number;
   active: boolean;
   onClick: () => void;
 }) {
@@ -366,7 +384,13 @@ function TickerRow({
     .join(" ");
   const name = fnName(t);
   return (
-    <div className={cls} onClick={onClick} role="button" tabIndex={0}>
+    <div
+      className={cls}
+      style={fresh && delayMs ? { animationDelay: `${delayMs}ms` } : undefined}
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+    >
       <TickerIcon tx={t} />
       <span className="tickFn mono" title={t.functionSig ? `${t.functionSig}  ${t.selector}` : t.selector}>
         {t.bucket === "eth_transfer" || creation ? (

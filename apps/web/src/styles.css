@@ -1060,3 +1060,7 @@ code {
 .rankTbl td:nth-child(2) {
   min-width: 150px;
 }
+/* a delayed row stays hidden until its turn (fill-mode backwards) */
+.tickRow.fresh {
+  animation-fill-mode: backwards;
+}
