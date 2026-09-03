@@ -99,6 +99,15 @@ export function iconFor(t: Pick<LiveTx, "bucket" | "status">): TxIcon {
 
 export const REGISTRY_REPO = "https://github.com/LedgerHQ/clear-signing-erc7730-registry";
 
+/**
+ * Where a contract address links to: Sourcify's repository page for it
+ * (verified source, ABI, metadata). Transactions and blocks keep their
+ * Etherscan links; contracts never link to Etherscan.
+ */
+export function contractUrl(chainId: number, address: string): string {
+  return `https://repo.sourcify.dev/${chainId}/${address}`;
+}
+
 /** Character limits for table cells: short labels (names, signatures) and running text (clear-signed text, field values). */
 export const CLIP_NAME = 48;
 export const CLIP_TEXT = 120;

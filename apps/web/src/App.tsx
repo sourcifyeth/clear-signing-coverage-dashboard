@@ -16,7 +16,7 @@ import { TxModal } from "./TxModal.tsx";
 import { BlockModal } from "./BlockModal.tsx";
 import { BucketBar, Toggle, Stat, numOr } from "./BucketBar.tsx";
 import { fmtInt, fmtPct, short, signablePct } from "./buckets.ts";
-import { clip, REGISTRY_REPO } from "./txMeta.ts";
+import { clip, contractUrl, REGISTRY_REPO } from "./txMeta.ts";
 
 export function App() {
   const [report, setReport] = useState<Report | null | undefined>(undefined);
@@ -291,7 +291,7 @@ function Snapshot({ report, state }: { report: Report; state: ToggleState }) {
                     )}
                     <a
                       className="mono"
-                      href={`https://etherscan.io/address/${c.toAddress}`}
+                      href={contractUrl(1, c.toAddress)}
                       target="_blank"
                       rel="noreferrer"
                     >

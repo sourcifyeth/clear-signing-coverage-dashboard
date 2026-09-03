@@ -9,7 +9,7 @@ import { isFieldGroup } from "@ethereum-sourcify/clear-signing";
 import type { DisplayModel, DisplayField } from "@ethereum-sourcify/clear-signing";
 import type { LiveTxDetail } from "./types.ts";
 import { fmtInt } from "./buckets.ts";
-import { canonicalSig, clip, CLIP_TEXT, contractName, iconFor, REGISTRY_REPO } from "./txMeta.ts";
+import { canonicalSig, clip, CLIP_TEXT, contractName, contractUrl, iconFor, REGISTRY_REPO } from "./txMeta.ts";
 
 /** The reduced record stored when a DisplayModel exceeded the size cap. */
 interface TruncatedDisplay {
@@ -97,7 +97,7 @@ function TxBody({ row }: { row: LiveTxDetail }) {
             {row.toAddress ? (
               <>
                 <b title={contractName(row.toAddress, row.entity)}>{clip(contractName(row.toAddress, row.entity))}</b>{" "}
-                <a className="mono muted" href={`https://etherscan.io/address/${row.toAddress}`} target="_blank" rel="noreferrer">
+                <a className="mono muted" href={contractUrl(1, row.toAddress)} target="_blank" rel="noreferrer">
                   {row.toAddress}
                 </a>
               </>

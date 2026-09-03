@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { LiveRanking, RankedContractRow, RankedSelector } from "./types.ts";
 import { fmtInt, fmtPct, short } from "./buckets.ts";
-import { canonicalSig, clip, contractName, fnShort, REGISTRY_REPO } from "./txMeta.ts";
+import { canonicalSig, clip, contractName, contractUrl, fnShort, REGISTRY_REPO } from "./txMeta.ts";
 
 const REFETCH_MIN_MS = 30_000;
 
@@ -126,7 +126,7 @@ function ContractCell({ toAddress, entity }: { toAddress: string; entity: string
   return (
     <span className="contractCell">
       {!isAddr && <span className="contractName">{name}</span>}
-      <a className="mono muted" href={`https://etherscan.io/address/${toAddress}`} target="_blank" rel="noreferrer">
+      <a className="mono muted" href={contractUrl(1, toAddress)} target="_blank" rel="noreferrer">
         {short(toAddress)}
       </a>
     </span>
