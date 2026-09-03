@@ -1828,3 +1828,41 @@ footer {
   left: auto;
   right: 0;
 }
+
+/* warnings: the whole line carries the tooltip, and the text is a size smaller */
+.warnTip {
+  position: relative;
+  font-size: 11px;
+  cursor: help;
+}
+.warnCode[data-tip]:hover::after {
+  content: none;
+}
+.warnCode {
+  position: static;
+  cursor: help;
+}
+.warnTip[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  width: max-content;
+  max-width: 340px;
+  background: var(--text);
+  color: #fff;
+  border-radius: 6px;
+  padding: 6px 9px;
+  font-size: 11px;
+  font-weight: 400;
+  font-family: var(--sans);
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
+  z-index: 5;
+}
+.fieldWarn.warnTip[data-tip]:hover::after {
+  left: auto;
+  right: 0;
+}

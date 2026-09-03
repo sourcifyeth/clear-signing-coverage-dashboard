@@ -20,7 +20,7 @@ const EXPLAIN: Record<string, string> = {
   INVALID_DESCRIPTOR: "The descriptor does not follow the ERC-7730 schema.",
   INTERPOLATION_ERROR: "A field value could not be inserted into the intent text.",
   UNKNOWN_TOKEN: "The token's symbol and decimals could not be resolved, so the amount is shown as a raw integer.",
-  UNKNOWN_ADDRESS: "No name (ENS or local) was found for this address, so the raw address is shown.",
+  UNKNOWN_ADDRESS: "No name was found for this address in ENS or the wallet's local address book, so the raw address is shown.",
   ADDRESS_TYPE_MISMATCH: "The address resolved to a name, but its kind (contract vs. wallet) is not one the descriptor allows.",
   CONTAINER_MISSING_CHAIN_ID: "The transaction carried no chain id, which this field's format needs.",
   CONTAINER_MISSING_REQUIRED_PATH: "A transaction property the descriptor references (for example the value or the sender) is missing.",

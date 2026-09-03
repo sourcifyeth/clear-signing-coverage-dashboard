@@ -338,11 +338,8 @@ export function countFieldWarnings(fields: DisplayModel["fields"]): number {
 function FieldWarning({ warning }: { warning?: { code: string; message: string } }) {
   if (!warning) return null;
   return (
-    <div className="fieldWarn small">
-      <span className="mono warnCode" data-tip={explainWarning(warning.code)}>
-        {warning.code}
-      </span>{" "}
-      {warning.message}
+    <div className="fieldWarn warnTip" data-tip={explainWarning(warning.code)}>
+      <span className="mono warnCode">{warning.code}</span> {warning.message}
     </div>
   );
 }
@@ -387,11 +384,8 @@ function WarningList({ warnings }: { warnings: DisplayModel["warnings"] }) {
   return (
     <div className="warnings">
       {warnings.map((w, i) => (
-        <div key={i} className="warnRow small">
-          <span className="mono warnCode" data-tip={explainWarning(String(w.code))}>
-            {w.code}
-          </span>{" "}
-          {w.message}
+        <div key={i} className="warnRow warnTip" data-tip={explainWarning(String(w.code))}>
+          <span className="mono warnCode">{w.code}</span> {w.message}
         </div>
       ))}
     </div>
