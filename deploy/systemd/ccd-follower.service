@@ -1,0 +1,39 @@
+[Unit]
+Description=Clear-signing coverage dashboard: block follower (indexer + Sourcify sync)
+Documentation=https://github.com/sourcifyeth/clear-signing-coverage-dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ccd
+Group=ccd
+WorkingDirectory=/opt/ccd/app
+# Secrets (RPC_URL / DRPC_API_KEY) and tuning live in the root-only env file.
+EnvironmentFile=/opt/ccd/env
+Environment=NODE_ENV=production
+Environment=DB_PATH=/opt/ccd/data/coverage.sqlite
+Environment=REGISTRY_PATH=/opt/ccd/registry
+# Run tsx through node directly: no PATH or shell involved.
+ExecStart=/usr/bin/node /opt/ccd/app/node_modules/tsx/dist/cli.mjs packages/worker/src/follower/follow.ts
+# SIGINT lets the follower finish its current block and stop the Sourcify sync.
+KillSignal=SIGINT
+TimeoutStopSec=30
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ccd-follower
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ccd/data
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

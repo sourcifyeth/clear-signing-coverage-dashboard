@@ -1,0 +1,5 @@
+# Pull the ERC-7730 registry every 10 minutes; restart the follower when it changed.
+# Installed by deploy/install.sh as /etc/cron.d/ccd-registry-sync.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+*/10 * * * * root /opt/ccd/app/deploy/registry-sync.sh

@@ -30,6 +30,7 @@
  *   GET /api/live/stream            -> SSE; `block` events as new blocks land
  *
  * Env: DB_PATH (default <repo>/out/coverage.sqlite), PORT (default 8787),
+ *      HOST (bind address, default 127.0.0.1),
  *      REGISTRY_PATH (default sibling ../clear-signing-erc7730-registry),
  *      RPC_URL (else DRPC_API_KEY -> DRPC, else a public mainnet endpoint).
  */
@@ -63,6 +64,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
 const DB_PATH = defaultDbPath();
 const PORT = Number(process.env.PORT ?? 8787);
+// Bind address. Loopback by default: in production nginx sits in front, and
+// in development Vite proxies to localhost. Set HOST=0.0.0.0 to expose it.
+const HOST = process.env.HOST || "127.0.0.1";
 const REGISTRY_PATH = path.resolve(
   process.env.REGISTRY_PATH ?? path.join(REPO_ROOT, "../clear-signing-erc7730-registry"),
 );
@@ -396,8 +400,8 @@ app.get("/api/tx/:hash", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
   console.log(
-    `coverage API on http://localhost:${PORT}  (DB_PATH=${DB_PATH}, REGISTRY_PATH=${REGISTRY_PATH})`,
+    `coverage API on http://${HOST}:${PORT}  (DB_PATH=${DB_PATH}, REGISTRY_PATH=${REGISTRY_PATH})`,
   );
 });

@@ -1,0 +1,38 @@
+[Unit]
+Description=Clear-signing coverage dashboard: API (Express + SSE, loopback only)
+Documentation=https://github.com/sourcifyeth/clear-signing-coverage-dashboard
+After=network-online.target ccd-follower.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ccd
+Group=ccd
+WorkingDirectory=/opt/ccd/app
+EnvironmentFile=/opt/ccd/env
+Environment=NODE_ENV=production
+Environment=DB_PATH=/opt/ccd/data/coverage.sqlite
+Environment=REGISTRY_PATH=/opt/ccd/registry
+# nginx proxies /api to this; never expose it directly.
+Environment=HOST=127.0.0.1
+Environment=PORT=8787
+ExecStart=/usr/bin/node /opt/ccd/app/node_modules/tsx/dist/cli.mjs packages/api/src/server.ts
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ccd-api
+
+# Hardening. The API only reads the database, but SQLite in WAL mode needs to
+# write the -wal / -shm files next to it.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ccd/data
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

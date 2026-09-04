@@ -232,6 +232,12 @@ token-transfer bucket.
 As of the current registry commit: **1250 mainnet `(address, selector)` rows**
 from 172 descriptors, 0 unparsable signatures.
 
+## Deployment
+
+One Ubuntu VM: nginx in front, two systemd services (follower and API), SQLite
+on local disk. Sizing, the install script and the day-to-day commands are in
+[`deploy/README.md`](deploy/README.md).
+
 ## Requirements
 
 Node >= 20.
