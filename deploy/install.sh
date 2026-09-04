@@ -41,9 +41,21 @@ echo "== packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq nginx git curl ca-certificates >/dev/null
-if ! command -v node >/dev/null 2>&1 || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 20 ]; then
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null
-  apt-get install -y -qq nodejs >/dev/null
+node_major() { node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0; }
+if [ "$(node_major)" -lt 20 ]; then
+  # Ubuntu 24.04+ ships Node 18+/22 in its own archive; prefer that when it is
+  # new enough (no third-party repo), else fall back to NodeSource's Node 20.
+  candidate=$(apt-cache policy nodejs | awk '/Candidate:/ {print $2}' | cut -d. -f1)
+  if [ "${candidate:-0}" -ge 20 ] 2>/dev/null; then
+    apt-get install -y -qq nodejs npm >/dev/null
+  else
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null
+    apt-get install -y -qq nodejs >/dev/null
+  fi
+fi
+if [ "$(node_major)" -lt 20 ]; then
+  echo "node >= 20 is required, found $(node -v 2>/dev/null || echo none)" >&2
+  exit 1
 fi
 echo "node $(node -v), npm $(npm -v)"
 
