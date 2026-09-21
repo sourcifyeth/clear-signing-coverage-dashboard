@@ -267,6 +267,56 @@ export function rebuildWindowsAndRankings(db: Db): { ms: number; rows: number; r
 }
 
 /**
+ * Version of the window-table logic. Bump it whenever the way the window
+ * tables are derived changes (new column, new counter, different semantics):
+ * the next follower start then rebuilds them once. Stored in meta.windows_version.
+ */
+export const WINDOWS_VERSION = "2026-09-21.1";
+
+export type EnsureResult =
+  | { rebuilt: false; reason: string; ms: number }
+  | { rebuilt: true; reason: string; ms: number; rows: number; rankingMs: number };
+
+/**
+ * Make the window tables usable at follower start without an unconditional
+ * rebuild. Every block updates them inside one transaction, so a stored set is
+ * either complete or absent. They are rebuilt only when:
+ *   - `force` is set (REBUILD_WINDOWS=1),
+ *   - the stored logic version differs from WINDOWS_VERSION,
+ *   - a window's `to_block` is not the newest stored block (an older follower
+ *     wrote blocks without maintaining the windows, or the tables are empty
+ *     while blocks exist).
+ * A rebuild takes minutes on a week of data and leaves the API with empty
+ * tables meanwhile, so skipping it is what makes restarts cheap.
+ */
+export function ensureWindows(db: Db, opts: { force?: boolean } = {}): EnsureResult {
+  const t0 = Date.now();
+  const stored = (db.prepare("SELECT value FROM meta WHERE key = 'windows_version'").get() as { value: string } | undefined)?.value ?? null;
+  const latest = (db.prepare("SELECT number FROM blocks ORDER BY number DESC LIMIT 1").get() as { number: number } | undefined)?.number ?? null;
+
+  let reason: string | null = null;
+  if (opts.force) reason = "forced (REBUILD_WINDOWS=1)";
+  else if (stored !== null && stored !== WINDOWS_VERSION) reason = `logic version ${stored} -> ${WINDOWS_VERSION}`;
+  else if (latest !== null) {
+    for (const key of WINDOW_KEYS) {
+      const m = windowMeta(db, key);
+      if (m.toBlock !== latest) {
+        reason = `window ${key} ends at ${m.toBlock ?? "none"}, stored head is ${latest}`;
+        break;
+      }
+    }
+  }
+
+  if (reason === null) {
+    if (stored === null) db.prepare("INSERT INTO meta (key, value) VALUES ('windows_version', ?)").run(WINDOWS_VERSION);
+    return { rebuilt: false, reason: latest === null ? "no blocks stored" : `windows end at the stored head ${latest}`, ms: Date.now() - t0 };
+  }
+  const r = rebuildWindowsAndRankings(db);
+  db.prepare("INSERT INTO meta (key, value) VALUES ('windows_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(WINDOWS_VERSION);
+  return { rebuilt: true, reason, ms: Date.now() - t0, rows: r.rows, rankingMs: r.rankingMs };
+}
+
+/**
  * The summary's `ranking` block for one exclusion combination, derived from a
  * stored row and the window totals under that exclusion.
  */

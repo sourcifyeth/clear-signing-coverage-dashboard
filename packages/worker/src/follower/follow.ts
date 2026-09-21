@@ -27,6 +27,9 @@
  *   CONTRACTS_SYNC   "0" turns off the background Sourcify verification sync
  *   CONTRACTS_BATCH  addresses checked per 30 s round, default 100
  *   CONTRACTS_RATE   Sourcify requests per second, default 4
+ *   RANKING_EVERY_MS how often the stored rankings are refreshed, default 60000
+ *   REBUILD_WINDOWS  "1" forces a rebuild of the window tables at start
+ *                    (otherwise they are kept when they end at the stored head)
  *
  * Usage: npm run follow
  */
@@ -44,7 +47,7 @@ import {
   insertBlock,
   deleteBlocksFrom,
   pruneLive,
-  rebuildWindowsAndRankings,
+  ensureWindows,
   refreshWindowRankingsIfDue,
   pruneContracts,
   blockHash,
@@ -145,11 +148,14 @@ async function main(): Promise<void> {
   const rpc = makeRpc(rpcCfg);
   const dbPath = defaultDbPath();
   const db = openDb(dbPath);
-  // Rolling-window running totals and the stored rankings: recompute once from
-  // block_groups so an older database (or one that stopped mid-way) starts
-  // consistent. Seconds on a week of data.
-  const rebuilt = rebuildWindowsAndRankings(db);
-  log(`follower: window totals rebuilt in ${rebuilt.ms} ms (${rebuilt.rows} rows; rankings ${rebuilt.rankingMs} ms)`);
+  // Rolling-window totals and the stored rankings: kept from the last run when
+  // they end at the stored head (every block updates them atomically); rebuilt
+  // from block_groups only when the logic version changed, the tables lag the
+  // blocks, or REBUILD_WINDOWS=1. A rebuild takes minutes on a week of data.
+  const ensured = ensureWindows(db, { force: process.env.REBUILD_WINDOWS === "1" });
+  if (ensured.rebuilt)
+    log(`follower: window totals rebuilt in ${ensured.ms} ms (${ensured.rows} rows; rankings ${ensured.rankingMs} ms): ${ensured.reason}`);
+  else log(`follower: window totals kept (${ensured.reason}; checked in ${ensured.ms} ms)`);
 
   let registryCommit: string | null = null;
   try {

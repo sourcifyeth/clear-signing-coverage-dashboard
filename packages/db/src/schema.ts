@@ -250,6 +250,14 @@ CREATE TABLE IF NOT EXISTS window_ranking (
 -- request per address against sourcify.dev/server/v2). verified 0 rows are
 -- rechecked after 24h, verified 1 rows after 30 days. Pruned with the blocks:
 -- a row survives only while some block in the retention window calls it.
+-- Small key/value store for bookkeeping: e.g. windows_version, the version of
+-- the window-table logic that built the current window tables (see
+-- ensureWindows in windowRanking.ts).
+CREATE TABLE IF NOT EXISTS meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS contracts (
   chain_id    INTEGER NOT NULL,
   address     TEXT    NOT NULL,   -- lowercase 0x
