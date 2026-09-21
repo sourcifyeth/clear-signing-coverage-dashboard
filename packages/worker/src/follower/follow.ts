@@ -45,6 +45,7 @@ import {
   deleteBlocksFrom,
   pruneLive,
   rebuildWindowsAndRankings,
+  refreshWindowRankingsIfDue,
   pruneContracts,
   blockHash,
   latestBlock,
@@ -66,6 +67,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CHAIN_ID = 1;
 const REORG_DEPTH = 8;
 const PRUNE_EVERY_BLOCKS = 100;
+/** how often the stored "what to build next" rankings are recomputed (they lag the totals by at most this) */
+const RANKING_EVERY_MS = Number(process.env.RANKING_EVERY_MS ?? 60_000);
 
 const POLL_MS = Number(process.env.POLL_MS ?? 4000);
 // At least 7: the 7d window needs its blocks kept until they expire from it.
@@ -267,6 +270,10 @@ async function main(): Promise<void> {
       } catch (e) {
         log(`follower: signature lookup failed: ${(e as Error).message}`);
       }
+
+      // Stored rankings: off the block transaction, at most every RANKING_EVERY_MS.
+      const rr = refreshWindowRankingsIfDue(db, RANKING_EVERY_MS);
+      if (rr) log(`follower: rankings refreshed in ${rr.ms} ms`);
 
       processed++;
       next++;

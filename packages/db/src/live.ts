@@ -22,7 +22,7 @@ import {
   windowBounds,
   CALL_BUCKETS_SQL,
 } from "./windows.js";
-import { computeWindowRanking, readWindowRanking, refreshWindowRankings, windowRankingFor, windowTotals } from "./windowRanking.js";
+import { computeWindowRanking, readWindowRanking, windowRankingFor, windowTotals } from "./windowRanking.js";
 
 // ---------------------------------------------------------------------------
 // Write
@@ -143,9 +143,8 @@ export function insertBlock(db: Db, block: BlockIn, txs: LiveTxIn[], groups: Blo
       );
     }
     // Running window totals: add this block, drop the ones it pushes out.
+    // (The stored rankings are refreshed separately, see refreshWindowRankingsIfDue.)
     addBlockToWindows(db, { number: block.number, timeIso: block.timeIso, txCount: block.txCount });
-    // The stored "what to build next" rankings follow in the same transaction.
-    refreshWindowRankings(db);
   })();
 }
 
@@ -157,7 +156,6 @@ export function deleteBlocksFrom(db: Db, number: number): number {
     db.prepare("DELETE FROM tx_index WHERE block_number >= ?").run(number);
     db.prepare("DELETE FROM block_groups WHERE block_number >= ?").run(number);
     const res = db.prepare("DELETE FROM blocks WHERE number >= ?").run(number);
-    refreshWindowRankings(db);
     return Number(res.changes);
   })();
 }

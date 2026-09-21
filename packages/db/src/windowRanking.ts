@@ -171,7 +171,21 @@ export function computeWindowRanking(db: Db, key: WindowKey): StoredRanking {
   };
 }
 
-/** Compute and store every window's ranking. Call after a block is written (inside or right after its transaction). */
+/**
+ * Refresh the stored rankings when the last refresh is older than `everyMs`.
+ * The 7d walk reads ~190k rows and takes seconds on a loaded machine, so it
+ * must not run inside every block transaction; the follower calls this after
+ * each block and the rankings lag the window totals by at most `everyMs`.
+ */
+let lastRankingRefresh = 0;
+export function refreshWindowRankingsIfDue(db: Db, everyMs: number): { ms: number } | null {
+  if (Date.now() - lastRankingRefresh < everyMs) return null;
+  const r = refreshWindowRankings(db);
+  lastRankingRefresh = Date.now();
+  return r;
+}
+
+/** Compute and store every window's ranking, in one transaction. */
 export function refreshWindowRankings(db: Db): { ms: number } {
   const t0 = Date.now();
   const put = db.prepare(
@@ -179,10 +193,12 @@ export function refreshWindowRankings(db: Db): { ms: number } {
      ON CONFLICT(window, exclude_eth, exclude_token) DO UPDATE SET json = excluded.json, to_block = excluded.to_block, computed_at = excluded.computed_at`,
   );
   const now = new Date().toISOString();
-  for (const key of WINDOW_KEYS) {
-    const r = computeWindowRanking(db, key);
-    put.run(key, JSON.stringify(r), r.toBlock, now);
-  }
+  db.transaction(() => {
+    for (const key of WINDOW_KEYS) {
+      const r = computeWindowRanking(db, key);
+      put.run(key, JSON.stringify(r), r.toBlock, now);
+    }
+  })();
   return { ms: Date.now() - t0 };
 }
 

@@ -230,6 +230,8 @@ CREATE TABLE IF NOT EXISTS window_contracts (
 CREATE INDEX IF NOT EXISTS window_contracts_tx ON window_contracts (window, tx_count DESC, to_address);
 CREATE INDEX IF NOT EXISTS window_contracts_ex ON window_contracts (window, tx_ex_token DESC, to_address);
 CREATE INDEX IF NOT EXISTS window_contracts_nc ON window_contracts (window, not_covered_tx DESC, to_address);
+-- verified=only pages and their totals: covering, so no table lookups.
+CREATE INDEX IF NOT EXISTS window_contracts_ver ON window_contracts (window, verified, tx_count DESC, to_address, tx_ex_token, covered_tx, covered_ex_token);
 
 -- The "what to build next" result per window and exclusion combination,
 -- computed by the follower once per block from window_contracts (see
