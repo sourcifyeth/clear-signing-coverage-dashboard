@@ -661,37 +661,24 @@ export interface RankedContractRow {
   sourcifyName: string | null;
 }
 
-export interface RankedFunctionRow {
-  toAddress: string;
-  entity: string | null;
-  selector: string;
-  functionSig: string | null;
-  bucket: Bucket;
-  covered: boolean;
-  txCount: number;
-  sharePct: number;
-  cumulativePct: number;
-}
-
 export interface LiveRanking {
   window: { hours: number; fromIso: string; toIso: string };
-  by: "contract" | "function";
+  /** always "contract" (the per-function ranking was removed) */
+  by: "contract";
   /** contract calls counted in the window after exclusions (the denominator of sharePct) */
   totalTx: number;
-  /** how many ranked rows exist in the window (contracts or functions), for paging */
+  /** how many ranked contracts exist in the window, for paging */
   total: number;
   /** the page served: rows [offset, offset + limit) of the ranking */
   offset: number;
   limit: number;
-  contracts?: RankedContractRow[];
-  functions?: RankedFunctionRow[];
+  contracts: RankedContractRow[];
 }
-
 
 export function liveRanking(
   db: Db,
   windowHours: number,
-  opts: { by: "contract" | "function"; limit?: number; offset?: number; chainId?: number; verifiedOnly?: boolean } & ExcludeOptions,
+  opts: { limit?: number; offset?: number; chainId?: number; verifiedOnly?: boolean } & ExcludeOptions,
 ): LiveRanking {
   const key = windowKeyForHours(windowHours);
   const { fromIso, toIso } = windowBounds(windowMeta(db, key), latestBlock(db)?.timeIso ?? new Date().toISOString());
@@ -703,82 +690,11 @@ export function liveRanking(
   const verifiedSql = opts.verifiedOnly
     ? ` AND to_address IN (SELECT address FROM contracts WHERE chain_id = ${Math.floor(Number(chainId))} AND verified = 1)`
     : "";
-  // Queries that join coverage/signatures need the window_groups columns
-  // qualified, since those tables have a `selector` column too.
-  const whereFor = (alias: string) => {
-    const p = alias ? `${alias}.` : "";
-    return `${p}window = ? AND ${p}bucket IN ${CALL_BUCKETS_SQL}${excludeSql(opts, alias)}${verifiedSql.replace("to_address", `${p}to_address`)}`;
-  };
-  const where = whereFor("");
-  const whereG = whereFor("g");
+  // The per-selector query joins coverage/signatures, so the window_groups
+  // columns are qualified (those tables have a `selector` column too).
+  const whereG = `g.window = ? AND g.bucket IN ${CALL_BUCKETS_SQL}${excludeSql(opts, "g")}${verifiedSql.replace("to_address", "g.to_address")}`;
   const window = { hours: windowHours, fromIso, toIso };
   const page = { offset, limit };
-
-  // Cumulative share must carry over from the rows before this page: sum the
-  // volume of the `offset` highest-ranked rows (0 for the first page).
-  const skippedTx = (groupBy: string): number =>
-    offset === 0
-      ? 0
-      : (
-          db
-            .prepare(
-              `SELECT COALESCE(SUM(n), 0) AS n FROM (
-                 SELECT SUM(tx_count) AS n FROM window_groups WHERE ${where} GROUP BY ${groupBy} ORDER BY n DESC, ${groupBy} LIMIT ?
-               )`,
-            )
-            .get(key, offset) as { n: number }
-        ).n;
-
-  if (opts.by === "function") {
-    // Function pages still group window_groups (not used by the web app).
-    const totalTx = (
-      db.prepare(`SELECT COALESCE(SUM(tx_count), 0) AS n FROM window_groups WHERE ${where}`).get(key) as {
-        n: number;
-      }
-    ).n;
-    const total = (
-      db
-        .prepare(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM window_groups WHERE ${where} GROUP BY to_address, selector)`)
-        .get(key) as { n: number }
-    ).n;
-    const rows = db
-      .prepare(
-        `SELECT g.to_address, g.selector, MAX(g.bucket) AS bucket, SUM(g.tx_count) AS n,
-                c.function_sig, c.entity, s.name AS sig_name
-         FROM window_groups g
-         LEFT JOIN coverage c ON c.chain_id = ? AND c.address = g.to_address AND c.selector = g.selector
-         LEFT JOIN signatures s ON s.selector = g.selector
-         WHERE ${whereG}
-         GROUP BY g.to_address, g.selector
-         ORDER BY n DESC, g.to_address, g.selector
-         LIMIT ? OFFSET ?`,
-      )
-      .all(chainId, key, limit, offset) as {
-      to_address: string;
-      selector: string;
-      bucket: Bucket;
-      n: number;
-      function_sig: string | null;
-      entity: string | null;
-      sig_name: string | null;
-    }[];
-    let cum = skippedTx("to_address, selector");
-    const functions: RankedFunctionRow[] = rows.map((r) => {
-      cum += r.n;
-      return {
-        toAddress: r.to_address,
-        entity: r.entity,
-        selector: r.selector,
-        functionSig: r.function_sig ?? r.sig_name,
-        bucket: r.bucket,
-        covered: r.bucket === "covered_theory",
-        txCount: r.n,
-        sharePct: pct(r.n, totalTx),
-        cumulativePct: pct(cum, totalTx),
-      };
-    });
-    return { window, by: "function", totalTx, total, ...page, functions };
-  }
 
   // Contract pages come from window_contracts through its (window, count)
   // indexes: no grouping of window_groups. excludeToken switches to the

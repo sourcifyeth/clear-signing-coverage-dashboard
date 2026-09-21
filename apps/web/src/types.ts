@@ -202,29 +202,16 @@ export interface RankedContractRow {
   sourcifyName?: string | null;
 }
 
-export interface RankedFunctionRow {
-  toAddress: string;
-  entity: string | null;
-  selector: string;
-  functionSig: string | null;
-  bucket: BucketKey;
-  covered: boolean;
-  txCount: number;
-  sharePct: number;
-  cumulativePct: number;
-}
-
 export interface LiveRanking {
   window: { hours: number; fromIso: string; toIso: string };
-  by: "contract" | "function";
+  by: "contract";
   totalTx: number;
-  /** ranked rows in the window (for paging) */
+  /** ranked contracts in the window (for paging) */
   total: number;
   /** the page served: rows [offset, offset + limit) */
   offset: number;
   limit: number;
   contracts?: RankedContractRow[];
-  functions?: RankedFunctionRow[];
 }
 
 export interface Report {

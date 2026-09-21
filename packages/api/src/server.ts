@@ -236,14 +236,14 @@ function cachedRanking(key: string, compute: () => LiveRanking): LiveRanking {
   return v;
 }
 
-// Contracts or functions in the window, ranked by transaction count, with coverage.
+// Contracts in the window, ranked by transaction count, with coverage.
+// (`by=function` was removed: it grouped the whole long tail per request.)
 app.get("/api/live/ranking", (req, res) => {
   const w = String(req.query.window ?? "24h");
   const hours = WINDOWS[w];
   if (!hours) return res.status(400).json({ error: "window must be 1h, 24h or 7d" });
-  const by = req.query.by === "function" ? "function" : "contract";
+  if (req.query.by !== undefined && req.query.by !== "contract") return res.status(400).json({ error: "only by=contract is supported" });
   const opts = {
-    by,
     limit: intQuery(req.query.limit, 100),
     offset: intQuery(req.query.offset, 0),
     // `verified=only`: contracts the Sourcify cache marks verified

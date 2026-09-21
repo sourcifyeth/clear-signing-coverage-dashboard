@@ -2,8 +2,6 @@
  * Window ranking: every contract called in the window, ordered by transaction
  * count, with its coverage state. Reading the table top to bottom answers two
  * questions at once: which contracts already help, and which ones to add next.
- * (The API also serves a per-function ranking, `by=function`; the page does
- * not show it.)
  */
 
 import { useEffect, useRef, useState } from "react";
