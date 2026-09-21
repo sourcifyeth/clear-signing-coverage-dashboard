@@ -34,6 +34,11 @@
  *               The summary and ranking read these; see windows.ts.
  *   window_meta Live follower. Per window: included block range, block count,
  *               tx total and the end time.
+ *   window_counters, window_contracts, window_ranking
+ *               Live follower. Derived per window with every block: bucket /
+ *               status counters, per-contract totals (indexed by count), and
+ *               the stored "what to build next" ranking. The summary and the
+ *               ranking pages read only these; see windowRanking.ts.
  */
 
 export const SCHEMA_SQL = `
@@ -191,6 +196,52 @@ CREATE TABLE IF NOT EXISTS window_meta (
   block_count INTEGER NOT NULL DEFAULT 0,
   tx_total    INTEGER NOT NULL DEFAULT 0,   -- sum of blocks.tx_count over the window
   to_time     TEXT                          -- block_time of to_block; the window ends here
+);
+
+-- Per-window bucket counters: tx_count per (bucket, status) and, of those, the
+-- calls whose selector is a standard token transfer/approval (std_count). The
+-- summary's buckets, practice and native counts are read from here under any
+-- exclusion, without touching window_groups. Maintained with window_groups.
+CREATE TABLE IF NOT EXISTS window_counters (
+  window     TEXT    NOT NULL,
+  bucket     TEXT    NOT NULL,
+  status     TEXT    NOT NULL DEFAULT '',
+  tx_count   INTEGER NOT NULL,
+  std_count  INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (window, bucket, status)
+);
+
+-- Per-window totals per contract over the call buckets (covered_theory,
+-- token_native, not_covered): the ranking pages read these through the
+-- indexes instead of grouping window_groups. tx_ex_token = tx_count minus the
+-- standard-token-selector calls (the excludeToken view). verified mirrors the
+-- contracts cache (NULL = not checked yet) so the summary needs no join.
+CREATE TABLE IF NOT EXISTS window_contracts (
+  window          TEXT    NOT NULL,
+  to_address      TEXT    NOT NULL,
+  tx_count        INTEGER NOT NULL,
+  tx_ex_token     INTEGER NOT NULL,
+  covered_tx      INTEGER NOT NULL DEFAULT 0,
+  covered_ex_token INTEGER NOT NULL DEFAULT 0,
+  not_covered_tx  INTEGER NOT NULL DEFAULT 0,
+  verified        INTEGER,
+  PRIMARY KEY (window, to_address)
+);
+CREATE INDEX IF NOT EXISTS window_contracts_tx ON window_contracts (window, tx_count DESC, to_address);
+CREATE INDEX IF NOT EXISTS window_contracts_ex ON window_contracts (window, tx_ex_token DESC, to_address);
+CREATE INDEX IF NOT EXISTS window_contracts_nc ON window_contracts (window, not_covered_tx DESC, to_address);
+
+-- The "what to build next" result per window and exclusion combination,
+-- computed by the follower once per block from window_contracts (see
+-- windowRanking.ts) and returned by the summary as is.
+CREATE TABLE IF NOT EXISTS window_ranking (
+  window        TEXT    NOT NULL,
+  exclude_eth   INTEGER NOT NULL,
+  exclude_token INTEGER NOT NULL,
+  json          TEXT    NOT NULL,
+  to_block      INTEGER,
+  computed_at   TEXT    NOT NULL,
+  PRIMARY KEY (window, exclude_eth, exclude_token)
 );
 
 -- Sourcify verification cache, filled by the follower's background Sourcify sync (one

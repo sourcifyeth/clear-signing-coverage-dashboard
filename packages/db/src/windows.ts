@@ -22,8 +22,16 @@
  */
 
 import type { Db } from "./index.js";
+import { STANDARD_TOKEN_SELECTORS, STANDARD_TOKEN_SELECTORS_SQL } from "./selectors.js";
 
 export const WINDOWS = { "1h": 3_600, "24h": 86_400, "7d": 604_800 } as const;
+
+/** The live tables are single-chain (mainnet); the contracts cache is keyed by chain. */
+export const LIVE_CHAIN_ID = 1;
+
+/** Buckets that are calls to a contract; the ranking and window_contracts cover these. */
+export const CALL_BUCKETS = ["covered_theory", "token_native", "not_covered"] as const;
+export const CALL_BUCKETS_SQL = `('covered_theory','token_native','not_covered')`;
 export type WindowKey = keyof typeof WINDOWS;
 export const WINDOW_KEYS = Object.keys(WINDOWS) as WindowKey[];
 
@@ -98,6 +106,22 @@ function stmts(db: Db) {
     delZero: db.prepare(
       "DELETE FROM window_groups WHERE window = ? AND to_address = ? AND selector = ? AND bucket = ? AND status = ? AND tx_count <= 0",
     ),
+    // Per-contract totals and the bucket counters take signed deltas through
+    // the same upsert; rows that reach zero are deleted afterwards.
+    contractDelta: db.prepare(
+      `INSERT INTO window_contracts (window, to_address, tx_count, tx_ex_token, covered_tx, covered_ex_token, not_covered_tx, verified)
+       VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT verified FROM contracts WHERE chain_id = ${LIVE_CHAIN_ID} AND address = ?))
+       ON CONFLICT(window, to_address) DO UPDATE SET
+         tx_count = tx_count + excluded.tx_count, tx_ex_token = tx_ex_token + excluded.tx_ex_token,
+         covered_tx = covered_tx + excluded.covered_tx, covered_ex_token = covered_ex_token + excluded.covered_ex_token,
+         not_covered_tx = not_covered_tx + excluded.not_covered_tx`,
+    ),
+    contractDelZero: db.prepare("DELETE FROM window_contracts WHERE window = ? AND to_address = ? AND tx_count <= 0"),
+    counterDelta: db.prepare(
+      `INSERT INTO window_counters (window, bucket, status, tx_count, std_count) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(window, bucket, status) DO UPDATE SET tx_count = tx_count + excluded.tx_count, std_count = std_count + excluded.std_count`,
+    ),
+    counterDelZero: db.prepare("DELETE FROM window_counters WHERE window = ? AND bucket = ? AND status = ? AND tx_count <= 0"),
     blocksBetweenOlderThan: db.prepare(
       "SELECT number, tx_count FROM blocks WHERE number >= ? AND number <= ? AND block_time < ? ORDER BY number",
     ),
@@ -112,16 +136,49 @@ function stmts(db: Db) {
 }
 type Stmts = ReturnType<typeof stmts>;
 
-function addBlockGroups(s: Stmts, key: WindowKey, number: number): void {
-  for (const g of s.groupsOf.all(number) as GroupRow[]) s.add.run(key, g.to_address, g.selector, g.bucket, g.status, g.tx_count);
-}
-
-function subBlockGroups(s: Stmts, key: WindowKey, number: number): void {
+/**
+ * Apply one block's groups to a window with sign +1 (include) or -1 (exclude):
+ * the group rows, the per-contract totals, and the bucket counters.
+ */
+function applyBlockGroups(s: Stmts, key: WindowKey, number: number, sign: 1 | -1): void {
+  const contracts = new Map<string, { tx: number; ex: number; cov: number; covEx: number; nc: number }>();
+  const counters = new Map<string, { bucket: string; status: string; tx: number; std: number }>();
+  const isCall = new Set<string>(CALL_BUCKETS);
   for (const g of s.groupsOf.all(number) as GroupRow[]) {
-    s.sub.run(g.tx_count, key, g.to_address, g.selector, g.bucket, g.status);
-    s.delZero.run(key, g.to_address, g.selector, g.bucket, g.status);
+    const n = sign * g.tx_count;
+    if (sign > 0) s.add.run(key, g.to_address, g.selector, g.bucket, g.status, g.tx_count);
+    else {
+      s.sub.run(g.tx_count, key, g.to_address, g.selector, g.bucket, g.status);
+      s.delZero.run(key, g.to_address, g.selector, g.bucket, g.status);
+    }
+    const std = STANDARD_TOKEN_SELECTORS.has(g.selector);
+    const ck = `${g.bucket}|${g.status}`;
+    const c = counters.get(ck) ?? { bucket: g.bucket, status: g.status, tx: 0, std: 0 };
+    c.tx += n;
+    if (std) c.std += n;
+    counters.set(ck, c);
+    if (!isCall.has(g.bucket)) continue;
+    const a = contracts.get(g.to_address) ?? { tx: 0, ex: 0, cov: 0, covEx: 0, nc: 0 };
+    a.tx += n;
+    if (!std) a.ex += n;
+    if (g.bucket === "covered_theory") {
+      a.cov += n;
+      if (!std) a.covEx += n;
+    } else if (g.bucket === "not_covered") a.nc += n;
+    contracts.set(g.to_address, a);
+  }
+  for (const [addr, a] of contracts) {
+    s.contractDelta.run(key, addr, a.tx, a.ex, a.cov, a.covEx, a.nc, addr);
+    if (sign < 0) s.contractDelZero.run(key, addr);
+  }
+  for (const c of counters.values()) {
+    s.counterDelta.run(key, c.bucket, c.status, c.tx, c.std);
+    if (sign < 0) s.counterDelZero.run(key, c.bucket, c.status);
   }
 }
+
+const addBlockGroups = (s: Stmts, key: WindowKey, number: number) => applyBlockGroups(s, key, number, 1);
+const subBlockGroups = (s: Stmts, key: WindowKey, number: number) => applyBlockGroups(s, key, number, -1);
 
 /** Subtract expired blocks so the window again holds exactly the blocks with block_time >= to_time - seconds. */
 function expire(db: Db, s: Stmts, m: WindowMeta): WindowMeta {
@@ -230,19 +287,43 @@ const REBUILD_GROUPS_SQL = `
   INSERT INTO window_groups (window, to_address, selector, bucket, status, tx_count)
   SELECT ?, to_address, selector, bucket, status, SUM(tx_count)
   FROM block_groups
-  WHERE block_time >= ? AND block_number <= ?
+  WHERE block_time >= ?
   GROUP BY to_address, selector, bucket, status`;
+// No `block_number <= latest` predicate: every stored block is <= latest, and
+// with it the planner walks the primary key over the whole table (12 minutes on
+// a week of data) instead of a range read on block_time (~40 s).
+
+/** Per-contract totals and bucket counters, derived from a window's group rows (`src` = table with window_groups columns). */
+const rebuildDerivedSql = (src: string, contracts: string, counters: string) => [
+  `INSERT INTO ${contracts} (window, to_address, tx_count, tx_ex_token, covered_tx, covered_ex_token, not_covered_tx, verified)
+   SELECT window, to_address, SUM(tx_count),
+          SUM(CASE WHEN selector NOT IN (${STANDARD_TOKEN_SELECTORS_SQL}) THEN tx_count ELSE 0 END),
+          SUM(CASE WHEN bucket = 'covered_theory' THEN tx_count ELSE 0 END),
+          SUM(CASE WHEN bucket = 'covered_theory' AND selector NOT IN (${STANDARD_TOKEN_SELECTORS_SQL}) THEN tx_count ELSE 0 END),
+          SUM(CASE WHEN bucket = 'not_covered' THEN tx_count ELSE 0 END),
+          (SELECT verified FROM contracts k WHERE k.chain_id = ${LIVE_CHAIN_ID} AND k.address = g.to_address)
+   FROM ${src} g WHERE window = ? AND bucket IN ${CALL_BUCKETS_SQL}
+   GROUP BY window, to_address`,
+  `INSERT INTO ${counters} (window, bucket, status, tx_count, std_count)
+   SELECT window, bucket, status, SUM(tx_count),
+          SUM(CASE WHEN selector IN (${STANDARD_TOKEN_SELECTORS_SQL}) THEN tx_count ELSE 0 END)
+   FROM ${src} WHERE window = ? GROUP BY window, bucket, status`,
+];
 
 /**
  * Drop and recompute every window from `block_groups` + `blocks`, relative to
  * the newest stored block. Used at follower start (covers databases created
- * before the window tables existed) and by the consistency check.
+ * before the window tables existed) and by the consistency check. The stored
+ * rankings are cleared here and rebuilt by `refreshWindowRankings`.
  */
 export function rebuildWindows(db: Db): { ms: number; rows: number } {
   const t0 = Date.now();
   let rows = 0;
   db.transaction(() => {
     db.prepare("DELETE FROM window_groups").run();
+    db.prepare("DELETE FROM window_contracts").run();
+    db.prepare("DELETE FROM window_counters").run();
+    db.prepare("DELETE FROM window_ranking").run();
     db.prepare("DELETE FROM window_meta").run();
     const latest = db.prepare("SELECT number, block_time FROM blocks ORDER BY number DESC LIMIT 1").get() as
       | { number: number; block_time: string }
@@ -253,7 +334,8 @@ export function rebuildWindows(db: Db): { ms: number; rows: number } {
         continue;
       }
       const cutoff = isoMinus(latest.block_time, WINDOWS[key]);
-      rows += Number(db.prepare(REBUILD_GROUPS_SQL).run(key, cutoff, latest.number).changes);
+      rows += Number(db.prepare(REBUILD_GROUPS_SQL).run(key, cutoff).changes);
+      for (const sql of rebuildDerivedSql("window_groups", "window_contracts", "window_counters")) db.prepare(sql).run(key);
       const inc = db
         .prepare("SELECT MIN(number) AS lo, COUNT(*) AS n, COALESCE(SUM(tx_count), 0) AS tx FROM blocks WHERE number <= ? AND block_time >= ?")
         .get(latest.number, cutoff) as { lo: number | null; n: number; tx: number };
@@ -289,7 +371,7 @@ export function checkWindows(db: Db, opts: { maxDiffs?: number } = {}): string[]
       continue;
     }
     const cutoff = isoMinus(latest.block_time, WINDOWS[key]);
-    db.prepare(REBUILD_GROUPS_SQL.replace("INSERT INTO window_groups", "INSERT INTO temp.expected_groups")).run(key, cutoff, latest.number);
+    db.prepare(REBUILD_GROUPS_SQL.replace("INSERT INTO window_groups", "INSERT INTO temp.expected_groups")).run(key, cutoff);
     const inc = db
       .prepare("SELECT MIN(number) AS lo, COUNT(*) AS n, COALESCE(SUM(tx_count), 0) AS tx FROM blocks WHERE number <= ? AND block_time >= ?")
       .get(latest.number, cutoff) as { lo: number | null; n: number; tx: number };
@@ -321,8 +403,58 @@ export function checkWindows(db: Db, opts: { maxDiffs?: number } = {}): string[]
         .get(key, r.to_address, r.selector, r.bucket, r.status) as { tx_count: number } | undefined;
       if (!shouldBe) diffs.push(`${key}: ${r.to_address} ${r.selector} ${r.bucket}/${r.status || "-"}: have ${r.tx_count}, expected no row`);
     }
+    // The derived tables must equal what the expected groups derive to
+    // (verified is a mirror of the contracts cache and is not compared).
+    db.exec("DROP TABLE IF EXISTS temp.expected_contracts");
+    db.exec("DROP TABLE IF EXISTS temp.expected_counters");
+    db.exec(
+      "CREATE TEMP TABLE expected_contracts (window TEXT, to_address TEXT, tx_count INTEGER, tx_ex_token INTEGER, covered_tx INTEGER, covered_ex_token INTEGER, not_covered_tx INTEGER, verified INTEGER)",
+    );
+    db.exec("CREATE TEMP TABLE expected_counters (window TEXT, bucket TEXT, status TEXT, tx_count INTEGER, std_count INTEGER)");
+    for (const sql of rebuildDerivedSql("temp.expected_groups", "temp.expected_contracts", "temp.expected_counters")) db.prepare(sql).run(key);
+    const cCols = "window, to_address, tx_count, tx_ex_token, covered_tx, covered_ex_token, not_covered_tx";
+    const cDiff = db
+      .prepare(
+        `SELECT * FROM (SELECT ${cCols} FROM temp.expected_contracts WHERE window = ? EXCEPT SELECT ${cCols} FROM window_contracts WHERE window = ?)
+         UNION ALL
+         SELECT * FROM (SELECT ${cCols} FROM window_contracts WHERE window = ? EXCEPT SELECT ${cCols} FROM temp.expected_contracts WHERE window = ?) LIMIT ?`,
+      )
+      .all(key, key, key, key, max) as { to_address: string; tx_count: number }[];
+    for (const r of cDiff) diffs.push(`${key}: window_contracts ${r.to_address} differs (tx_count ${r.tx_count} on one side)`);
+    const kCols = "window, bucket, status, tx_count, std_count";
+    const kDiff = db
+      .prepare(
+        `SELECT * FROM (SELECT ${kCols} FROM temp.expected_counters WHERE window = ? EXCEPT SELECT ${kCols} FROM window_counters WHERE window = ?)
+         UNION ALL
+         SELECT * FROM (SELECT ${kCols} FROM window_counters WHERE window = ? EXCEPT SELECT ${kCols} FROM temp.expected_counters WHERE window = ?) LIMIT ?`,
+      )
+      .all(key, key, key, key, max) as { bucket: string; status: string; tx_count: number; std_count: number }[];
+    for (const r of kDiff) diffs.push(`${key}: window_counters ${r.bucket}/${r.status || "-"} differs (${r.tx_count}/${r.std_count} on one side)`);
+    db.exec("DROP TABLE IF EXISTS temp.expected_contracts");
+    db.exec("DROP TABLE IF EXISTS temp.expected_counters");
     if (diffs.length >= max) break;
   }
   db.exec("DROP TABLE IF EXISTS temp.expected_groups");
   return diffs.slice(0, max);
+}
+
+// ---------------------------------------------------------------------------
+// Counters (read side)
+
+export interface WindowCounter {
+  bucket: string;
+  status: string;
+  txCount: number;
+  stdCount: number;
+}
+
+export function windowCounters(db: Db, key: WindowKey): WindowCounter[] {
+  return (
+    db.prepare("SELECT bucket, status, tx_count, std_count FROM window_counters WHERE window = ?").all(key) as {
+      bucket: string;
+      status: string;
+      tx_count: number;
+      std_count: number;
+    }[]
+  ).map((r) => ({ bucket: r.bucket, status: r.status, txCount: r.tx_count, stdCount: r.std_count }));
 }

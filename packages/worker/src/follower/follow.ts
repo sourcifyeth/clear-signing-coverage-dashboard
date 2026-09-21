@@ -44,7 +44,7 @@ import {
   insertBlock,
   deleteBlocksFrom,
   pruneLive,
-  rebuildWindows,
+  rebuildWindowsAndRankings,
   pruneContracts,
   blockHash,
   latestBlock,
@@ -142,10 +142,11 @@ async function main(): Promise<void> {
   const rpc = makeRpc(rpcCfg);
   const dbPath = defaultDbPath();
   const db = openDb(dbPath);
-  // Rolling-window running totals: recompute once from block_groups so an older
-  // database (or one that stopped mid-way) starts consistent; ms on a week of data.
-  const rebuilt = rebuildWindows(db);
-  log(`follower: window totals rebuilt in ${rebuilt.ms} ms (${rebuilt.rows} rows)`);
+  // Rolling-window running totals and the stored rankings: recompute once from
+  // block_groups so an older database (or one that stopped mid-way) starts
+  // consistent. Seconds on a week of data.
+  const rebuilt = rebuildWindowsAndRankings(db);
+  log(`follower: window totals rebuilt in ${rebuilt.ms} ms (${rebuilt.rows} rows; rankings ${rebuilt.rankingMs} ms)`);
 
   let registryCommit: string | null = null;
   try {

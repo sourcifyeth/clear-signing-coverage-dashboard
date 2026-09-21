@@ -11,6 +11,7 @@
  */
 
 import type { Db } from "./index.js";
+import { LIVE_CHAIN_ID, WINDOW_KEYS } from "./windows.js";
 
 export type MatchKind = "exact_match" | "match";
 
@@ -89,9 +90,14 @@ export function upsertContracts(db: Db, rows: ContractIn[], now: Date = new Date
        checked_at = excluded.checked_at,
        verified_at = COALESCE(excluded.verified_at, contracts.verified_at)`,
   );
+  // The per-window contract totals mirror the flag, so the summary needs no join.
+  const mirror = db.prepare("UPDATE window_contracts SET verified = ? WHERE window = ? AND to_address = ?");
   db.transaction((rs: ContractIn[]) => {
-    for (const r of rs)
-      stmt.run(r.chainId, r.address.toLowerCase(), r.verified ? 1 : 0, r.match, r.name, nowIso, r.verifiedAtIso);
+    for (const r of rs) {
+      const addr = r.address.toLowerCase();
+      stmt.run(r.chainId, addr, r.verified ? 1 : 0, r.match, r.name, nowIso, r.verifiedAtIso);
+      if (r.chainId === LIVE_CHAIN_ID) for (const w of WINDOW_KEYS) mirror.run(r.verified ? 1 : 0, w, addr);
+    }
   })(rows);
 }
 

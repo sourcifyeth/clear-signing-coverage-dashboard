@@ -9,7 +9,7 @@
 
 import type { Db } from "./index.js";
 import type { Bucket, PracticalStatus } from "./write.js";
-import { computeRanking, rankingCurve, pct, type RankedContract } from "./ranking.js";
+import { pct, type RankedContract } from "./ranking.js";
 import { STANDARD_TOKEN_SELECTORS_SQL, excludeSql, type ExcludeOptions } from "./selectors.js";
 import { getContracts } from "./contracts.js";
 import {
@@ -20,7 +20,9 @@ import {
   windowKeyForHours,
   windowMeta,
   windowBounds,
+  CALL_BUCKETS_SQL,
 } from "./windows.js";
+import { computeWindowRanking, readWindowRanking, refreshWindowRankings, windowRankingFor, windowTotals } from "./windowRanking.js";
 
 // ---------------------------------------------------------------------------
 // Write
@@ -142,6 +144,8 @@ export function insertBlock(db: Db, block: BlockIn, txs: LiveTxIn[], groups: Blo
     }
     // Running window totals: add this block, drop the ones it pushes out.
     addBlockToWindows(db, { number: block.number, timeIso: block.timeIso, txCount: block.txCount });
+    // The stored "what to build next" rankings follow in the same transaction.
+    refreshWindowRankings(db);
   })();
 }
 
@@ -153,6 +157,7 @@ export function deleteBlocksFrom(db: Db, number: number): number {
     db.prepare("DELETE FROM tx_index WHERE block_number >= ?").run(number);
     db.prepare("DELETE FROM block_groups WHERE block_number >= ?").run(number);
     const res = db.prepare("DELETE FROM blocks WHERE number >= ?").run(number);
+    refreshWindowRankings(db);
     return Number(res.changes);
   })();
 }
@@ -249,14 +254,6 @@ export interface LiveSummary {
   };
 }
 
-const EMPTY_BUCKETS = (): Record<Bucket, number> => ({
-  contract_creation: 0,
-  eth_transfer: 0,
-  covered_theory: 0,
-  token_native: 0,
-  not_covered: 0,
-});
-
 /**
  * Rolling-window summary, read from the running totals the follower keeps
  * (`window_groups` / `window_meta`, see windows.ts). The window ends at the
@@ -271,106 +268,38 @@ export function liveSummary(
   const key = windowKeyForHours(windowHours);
   const meta = windowMeta(db, key);
   const { fromIso, toIso } = windowBounds(meta, latestBlock(db)?.timeIso ?? new Date().toISOString());
-  const limit = Math.max(1, Math.min(opts.limit ?? 200, 5000));
-  const chainId = opts.chainId ?? 1;
   const filter = { excludeEth: !!opts.excludeEth, excludeToken: !!opts.excludeToken };
-  const ex = excludeSql(filter);
-  let notCoveredUnverified = 0;
-  const verificationCoverage = { checked: 0, total: 0 };
 
-  const range = { lo: meta.fromBlock, hi: meta.toBlock, n: meta.blockCount, tx: meta.txTotal };
+  // Everything comes from the follower's per-window tables: the counters for
+  // the totals, the stored ranking for the long-tail walk. No scan of
+  // window_groups here. A database the follower has not touched since the
+  // ranking table appeared gets the ranking computed on the spot.
+  const totals = windowTotals(db, key, filter);
+  const stored = readWindowRanking(db, key) ?? computeWindowRanking(db, key);
+  const ranking = windowRankingFor(stored, totals, filter, { limit: opts.limit, curvePoints: opts.curvePoints });
 
-  const buckets = EMPTY_BUCKETS();
-  const practice = { passTx: 0, partialTx: 0, failedTx: 0, practicePct: 0 };
-  const native = { ethTransfers: 0, tokenTransfers: 0 };
-  let notCovered: { toAddress: string; selector: string; txCount: number }[] = [];
-
-  if (range.lo !== null && range.hi !== null) {
-    // Every query is a scan of this window's rows only, no time predicate.
-    // The exclusion clauses apply to every query here, so buckets, practice,
-    // and the ranking agree with each other.
-    const bucketRows = db
-      .prepare(`SELECT bucket, SUM(tx_count) AS n FROM window_groups WHERE window = ?${ex} GROUP BY bucket`)
-      .all(key) as { bucket: Bucket; n: number }[];
-    for (const r of bucketRows) if (r.bucket in buckets) buckets[r.bucket] = r.n;
-
-    native.ethTransfers = (
-      db.prepare("SELECT COALESCE(SUM(tx_count), 0) AS n FROM window_groups WHERE window = ? AND bucket = 'eth_transfer'").get(key) as {
-        n: number;
-      }
-    ).n;
-    native.tokenTransfers = (
-      db
-        .prepare(`SELECT COALESCE(SUM(tx_count), 0) AS n FROM window_groups WHERE window = ? AND selector IN (${STANDARD_TOKEN_SELECTORS_SQL})`)
-        .get(key) as { n: number }
-    ).n;
-
-    const statusRows = db
-      .prepare(`SELECT status, SUM(tx_count) AS n FROM window_groups WHERE window = ? AND bucket = 'covered_theory'${ex} GROUP BY status`)
-      .all(key) as { status: string; n: number }[];
-    for (const r of statusRows) {
-      if (r.status === "pass") practice.passTx = r.n;
-      else if (r.status === "partial") practice.partialTx = r.n;
-      else if (r.status === "failed") practice.failedTx = r.n;
-    }
-    const covered = practice.passTx + practice.partialTx + practice.failedTx;
-    practice.practicePct = pct(practice.passTx + practice.partialTx, covered);
-
-    notCovered = (
-      db
-        .prepare(
-          `SELECT to_address, selector, SUM(tx_count) AS n FROM window_groups
-           WHERE window = ? AND bucket = 'not_covered'${ex}
-           GROUP BY to_address, selector`,
-        )
-        .all(key) as { to_address: string; selector: string; n: number }[]
-    ).map((r) => ({ toAddress: r.to_address, selector: r.selector, txCount: r.n }));
-
-    // Sourcify verification split of the not-covered calls (cache-driven; see contracts.ts).
-    notCoveredUnverified = (
-      db
-        .prepare(
-          `SELECT COALESCE(SUM(g.tx_count), 0) AS n FROM window_groups g
-           JOIN contracts k ON k.chain_id = ? AND k.address = g.to_address AND k.verified = 0
-           WHERE g.window = ? AND g.bucket = 'not_covered'${excludeSql(filter, "g")}`,
-        )
-        .get(chainId, key) as { n: number }
-    ).n;
-    const cov = db
-      .prepare(
-        `SELECT COUNT(DISTINCT g.to_address) AS total, COUNT(DISTINCT k.address) AS checked FROM window_groups g
-         LEFT JOIN contracts k ON k.chain_id = ? AND k.address = g.to_address
-         WHERE g.window = ? AND g.bucket = 'not_covered'${excludeSql(filter, "g")}`,
-      )
-      .get(chainId, key) as { total: number; checked: number };
-    verificationCoverage.total = cov.total;
-    verificationCoverage.checked = cov.checked;
-  }
-
-  const allTx = range.tx;
+  const { buckets, native, allTx, totalTx } = totals;
+  const covered = totals.practice.passTx + totals.practice.partialTx + totals.practice.failedTx;
+  const practice = { ...totals.practice, practicePct: pct(totals.practice.passTx + totals.practice.partialTx, covered) };
   const excluded = {
     ethTransfers: filter.excludeEth ? native.ethTransfers : 0,
     tokenTransfers: filter.excludeToken ? native.tokenTransfers : 0,
   };
-  const totalTx = allTx - excluded.ethTransfers - excluded.tokenTransfers;
-  // With a bucket excluded its count is 0 here, so the ranking baseline shrinks
-  // to what is still counted (e.g. descriptors only).
-  const ranking = computeRanking(notCovered, buckets, totalTx);
   const contractCalls = totalTx - buckets.eth_transfer - buckets.contract_creation;
 
   return {
     window: { hours: windowHours, fromIso, toIso },
-    blocks: range.n,
-    firstBlock: range.lo,
-    lastBlock: range.hi,
+    blocks: meta.blockCount,
+    firstBlock: meta.fromBlock,
+    lastBlock: meta.toBlock,
     totalTx,
     allTx,
     filter,
     native,
     excluded,
     buckets,
-    notCoveredUnverified,
-    verificationCoverage,
+    notCoveredUnverified: stored.notCoveredUnverified,
+    verificationCoverage: stored.verificationCoverage,
     headline: {
       theoryPctOfAll: pct(buckets.covered_theory, totalTx),
       theoryPlusNativePctOfAll: ranking.baselinePct,
@@ -378,11 +307,11 @@ export function liveSummary(
     },
     practice,
     ranking: {
-      contracts: ranking.contracts.slice(0, limit),
-      totalContracts: ranking.contracts.length,
+      contracts: ranking.contracts,
+      totalContracts: ranking.totalContracts,
       contractsToReach80: ranking.contractsToReach80,
       contractsToReach95: ranking.contractsToReach95,
-      curve: rankingCurve(ranking, { maxPoints: opts.curvePoints }),
+      curve: ranking.curve,
     },
   };
 }
@@ -760,7 +689,6 @@ export interface LiveRanking {
   functions?: RankedFunctionRow[];
 }
 
-const CALL_BUCKETS_SQL = "('covered_theory','token_native','not_covered')";
 
 export function liveRanking(
   db: Db,
@@ -785,12 +713,6 @@ export function liveRanking(
   };
   const where = whereFor("");
   const whereG = whereFor("g");
-
-  const totalTx = (
-    db.prepare(`SELECT COALESCE(SUM(tx_count), 0) AS n FROM window_groups WHERE ${where}`).get(key) as {
-      n: number;
-    }
-  ).n;
   const window = { hours: windowHours, fromIso, toIso };
   const page = { offset, limit };
 
@@ -810,6 +732,12 @@ export function liveRanking(
         ).n;
 
   if (opts.by === "function") {
+    // Function pages still group window_groups (not used by the web app).
+    const totalTx = (
+      db.prepare(`SELECT COALESCE(SUM(tx_count), 0) AS n FROM window_groups WHERE ${where}`).get(key) as {
+        n: number;
+      }
+    ).n;
     const total = (
       db
         .prepare(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM window_groups WHERE ${where} GROUP BY to_address, selector)`)
@@ -854,24 +782,33 @@ export function liveRanking(
     return { window, by: "function", totalTx, total, ...page, functions };
   }
 
-  const total = (
-    db.prepare(`SELECT COUNT(DISTINCT to_address) AS n FROM window_groups WHERE ${where}`).get(key) as {
-      n: number;
-    }
-  ).n;
+  // Contract pages come from window_contracts through its (window, count)
+  // indexes: no grouping of window_groups. excludeToken switches to the
+  // tx_ex_token column (standard-selector calls left out); excludeEth changes
+  // nothing here, since ETH sends are not contract calls.
+  const col = opts.excludeToken ? "tx_ex_token" : "tx_count";
+  const covCol = opts.excludeToken ? "covered_ex_token" : "covered_tx";
+  const wc = `window = ? AND ${col} > 0${opts.verifiedOnly ? " AND verified = 1" : ""}`;
+  const agg = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(${col}), 0) AS tx FROM window_contracts WHERE ${wc}`).get(key) as { n: number; tx: number };
+  const total = agg.n;
+  const totalTx = agg.tx;
   const rows = db
     .prepare(
-      `SELECT to_address, SUM(tx_count) AS n,
-              SUM(CASE WHEN bucket = 'covered_theory' THEN tx_count ELSE 0 END) AS covered,
-              COUNT(DISTINCT selector) AS selectors
-       FROM window_groups
-       WHERE ${where}
-       GROUP BY to_address
-       ORDER BY n DESC, to_address
+      `SELECT to_address, ${col} AS n, ${covCol} AS covered
+       FROM window_contracts WHERE ${wc}
+       ORDER BY ${col} DESC, to_address
        LIMIT ? OFFSET ?`,
     )
-    .all(key, limit, offset) as { to_address: string; n: number; covered: number; selectors: number }[];
+    .all(key, limit, offset) as { to_address: string; n: number; covered: number }[];
   if (rows.length === 0) return { window, by: "contract", totalTx, total, ...page, contracts: [] };
+  const skippedContractTx =
+    offset === 0
+      ? 0
+      : (
+          db
+            .prepare(`SELECT COALESCE(SUM(n), 0) AS n FROM (SELECT ${col} AS n FROM window_contracts WHERE ${wc} ORDER BY ${col} DESC, to_address LIMIT ?)`)
+            .get(key, offset) as { n: number }
+        ).n;
 
   const addrs = rows.map((r) => r.to_address);
   const inList = addrs.map(() => "?").join(",");
@@ -917,8 +854,10 @@ export function liveRanking(
   }
 
   const verifiedOf = getContracts(db, chainId, addrs);
+  const selectorCount = new Map<string, number>();
+  for (const r of selRows) selectorCount.set(r.to_address, (selectorCount.get(r.to_address) ?? 0) + 1);
 
-  let cum = skippedTx("to_address");
+  let cum = skippedContractTx;
   const contracts: RankedContractRow[] = rows.map((r) => {
     cum += r.n;
     const k = verifiedOf.get(r.to_address);
@@ -933,7 +872,7 @@ export function liveRanking(
       cumulativePct: pct(cum, totalTx),
       coveredTx: r.covered,
       coveredPct: pct(r.covered, r.n),
-      distinctSelectors: r.selectors,
+      distinctSelectors: selectorCount.get(r.to_address) ?? 0,
       topSelectors: selsOf.get(r.to_address) ?? [],
     };
   });
