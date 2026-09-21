@@ -277,6 +277,12 @@ async function main(): Promise<void> {
         // Verification cache rows outlive their last call only until this prune.
         const staleContracts = pruneContracts(db, CHAIN_ID);
         if (staleContracts) log(`follower: pruned ${staleContracts} contract rows no block in the window calls`);
+        // Fold the write-ahead log back into the main file and truncate it.
+        // The automatic checkpoint cannot complete while the API holds a long
+        // read, so the log grew to a gigabyte; this one runs between blocks.
+        const cp = db.pragma("wal_checkpoint(TRUNCATE)") as { busy: number; log: number; checkpointed: number }[];
+        const r = cp[0];
+        log(`follower: wal checkpoint ${r.busy ? "busy (a reader held it)" : "done"}: ${r.checkpointed}/${r.log} pages`);
       }
     } catch (e) {
       log(`follower: error: ${(e as Error).message}; retry in ${backoff}ms`);

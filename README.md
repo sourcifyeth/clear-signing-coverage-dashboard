@@ -71,6 +71,14 @@ SQLite in WAL mode is enough; no database server is needed. Tables:
 | `window_ranking` | follower | the "what to build next" result per window (top 100 not-covered contracts with selectors, the cumulative curve, the 80% / 95% ranks for each exclusion combination, the verification split), computed once per block from `window_contracts` and returned by the summary as is |
 | `tx_index`  | follower   | one row per transaction: hash, block, to, selector, bucket, and for covered ones the library's status, warning codes, one-line intent and the full display model as JSON (capped at 8 KB). 7-day retention via `pruneLive()` |
 
+SQLite settings, applied by `openDb()` on every connection: WAL journal, a
+256 MB page cache, a 1 GB memory map, and in-memory temp storage. The
+defaults (a 2 MB cache, no memory map) made every request re-read the window
+tables from disk once the file passed a few gigabytes. The follower also runs
+`PRAGMA wal_checkpoint(TRUNCATE)` with each prune cycle (every 100 blocks), so
+the write-ahead log does not grow past a few hundred megabytes while the API
+holds read transactions.
+
 We never store transaction contents (calldata, value, sender). The browser
 fetches a transaction over RPC and decodes it on demand; for transactions the
 follower already processed, its stored result is shown next to the fresh run.

@@ -29,6 +29,14 @@ export function openDb(dbPath: string = defaultDbPath(), opts?: { readonly?: boo
   const db = new Database(dbPath, { readonly: opts?.readonly ?? false });
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+  // The live tables are read with point and range lookups over an 11 GB file.
+  // The default 2 MB page cache is far too small: a larger cache keeps the
+  // window tables and the hot indexes in the process, and mmap lets the OS
+  // page cache serve the rest without a copy. temp_store in memory keeps the
+  // GROUP BY sorts of the rebuild and the block stats off the disk.
+  db.pragma("cache_size = -262144"); // 256 MB
+  db.pragma("mmap_size = 1073741824"); // 1 GB
+  db.pragma("temp_store = MEMORY");
   if (!opts?.readonly) {
     db.exec(SCHEMA_SQL);
     migrateAddedColumns(db);
@@ -62,5 +70,6 @@ export * from "./ranking.js";
 export * from "./selectors.js";
 export * from "./live.js";
 export * from "./windows.js";
+export * from "./windowRanking.js";
 export * from "./tokens.js";
 export * from "./contracts.js";
