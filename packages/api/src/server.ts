@@ -57,6 +57,8 @@ import {
   liveRanking,
   registryCommit,
   type Bucket,
+  type LiveSummary,
+  type LiveRanking,
 } from "@ccd/db";
 import { makeRpc, rpcFromEnv } from "@ccd/rpc";
 
@@ -149,23 +151,107 @@ app.get("/api/live/block/:number", (req, res) => {
   res.json(d);
 });
 
+// ---------------------------------------------------------------------------
+// Per-block caches. The follower writes one block every ~12 s; nothing the
+// summary or ranking endpoints return changes in between. So each response is
+// computed at most once per block and served from memory until the next one.
+
+const log = (msg: string) => process.stderr.write(`${new Date().toISOString()} api: ${msg}\n`);
+
+/** Summaries: one entry per (window, excludeEth, excludeToken); 12 at most. */
+interface SummaryEntry {
+  value: LiveSummary;
+  /** the latest block when it was computed */
+  block: number | null;
+  computedAtIso: string;
+  /** last time a request asked for it; idle entries are not refreshed */
+  lastRequestedAt: number;
+}
+const SUMMARY_LIMIT = 200;
+const SUMMARY_CURVE = 500;
+/** an entry is refreshed on new blocks only while it was requested within this long */
+const SUMMARY_ACTIVE_MS = 10 * 60_000;
+const summaryCache = new Map<string, SummaryEntry>();
+const summaryKey = (hours: number, f: { excludeEth: boolean; excludeToken: boolean }) =>
+  `${hours}|${f.excludeEth ? 1 : 0}|${f.excludeToken ? 1 : 0}`;
+
+function computeSummary(hours: number, f: { excludeEth: boolean; excludeToken: boolean }, why: string): SummaryEntry {
+  const t0 = Date.now();
+  const block = latestBlock(db)?.number ?? null;
+  const value = liveSummary(db, hours, { limit: SUMMARY_LIMIT, curvePoints: SUMMARY_CURVE, ...f });
+  const key = summaryKey(hours, f);
+  const prev = summaryCache.get(key);
+  const entry: SummaryEntry = { value, block, computedAtIso: new Date().toISOString(), lastRequestedAt: prev?.lastRequestedAt ?? Date.now() };
+  summaryCache.set(key, entry);
+  log(`summary ${key} recomputed in ${Date.now() - t0} ms (${why}, block ${block ?? "-"})`);
+  return entry;
+}
+
+/** The cached summary for a request, computed on a miss. */
+function cachedSummary(hours: number, f: { excludeEth: boolean; excludeToken: boolean }): SummaryEntry {
+  const key = summaryKey(hours, f);
+  let e = summaryCache.get(key);
+  if (!e) e = computeSummary(hours, f, "miss");
+  e.lastRequestedAt = Date.now();
+  return e;
+}
+
+/**
+ * New block: recompute the 24h plain summary now (the SSE payload carries it),
+ * then the other active entries one per event-loop turn, so requests
+ * interleave with the refreshes instead of waiting behind all of them.
+ */
+function refreshSummariesForBlock(): void {
+  const now = Date.now();
+  computeSummary(24, { excludeEth: false, excludeToken: false }, "new block");
+  const stale = [...summaryCache.entries()].filter(
+    ([k, e]) => k !== summaryKey(24, { excludeEth: false, excludeToken: false }) && now - e.lastRequestedAt <= SUMMARY_ACTIVE_MS,
+  );
+  const step = () => {
+    const next = stale.shift();
+    if (!next) return;
+    const [hours, eth, token] = next[0].split("|");
+    computeSummary(Number(hours), { excludeEth: eth === "1", excludeToken: token === "1" }, "new block, active");
+    setImmediate(step);
+  };
+  setImmediate(step);
+}
+
+/** Rankings: keyed by the full query, valid for one block. */
+const rankingCache = new Map<string, LiveRanking>();
+let rankingCacheBlock: number | null = null;
+function cachedRanking(key: string, compute: () => LiveRanking): LiveRanking {
+  const block = latestBlock(db)?.number ?? null;
+  if (block !== rankingCacheBlock) {
+    rankingCache.clear();
+    rankingCacheBlock = block;
+  }
+  let v = rankingCache.get(key);
+  if (!v) {
+    const t0 = Date.now();
+    v = compute();
+    rankingCache.set(key, v);
+    log(`ranking ${key} computed in ${Date.now() - t0} ms (block ${block ?? "-"})`);
+  }
+  return v;
+}
+
 // Contracts or functions in the window, ranked by transaction count, with coverage.
 app.get("/api/live/ranking", (req, res) => {
   const w = String(req.query.window ?? "24h");
   const hours = WINDOWS[w];
   if (!hours) return res.status(400).json({ error: "window must be 1h, 24h or 7d" });
   const by = req.query.by === "function" ? "function" : "contract";
+  const opts = {
+    by,
+    limit: intQuery(req.query.limit, 100),
+    offset: intQuery(req.query.offset, 0),
+    // `verified=only`: contracts the Sourcify cache marks verified
+    verifiedOnly: req.query.verified === "only",
+    ...excludeQuery(req.query.exclude),
+  } as const;
   res.set("Cache-Control", "no-cache");
-  res.json(
-    liveRanking(db, hours, {
-      by,
-      limit: intQuery(req.query.limit, 100),
-      offset: intQuery(req.query.offset, 0),
-      // `verified=only`: contracts the Sourcify cache marks verified
-      verifiedOnly: req.query.verified === "only",
-      ...excludeQuery(req.query.exclude),
-    }),
-  );
+  res.json(cachedRanking(`${w}|${JSON.stringify(opts)}`, () => liveRanking(db, hours, opts)));
 });
 
 /**
@@ -182,14 +268,21 @@ app.get("/api/live/summary", (req, res) => {
   const w = String(req.query.window ?? "24h");
   const hours = WINDOWS[w];
   if (!hours) return res.status(400).json({ error: "window must be 1h, 24h or 7d" });
+  const limit = intQuery(req.query.limit, SUMMARY_LIMIT);
+  const curvePoints = intQuery(req.query.curve, SUMMARY_CURVE);
+  const f = excludeQuery(req.query.exclude);
   res.set("Cache-Control", "no-cache");
-  res.json(
-    liveSummary(db, hours, {
-      limit: intQuery(req.query.limit, 200),
-      curvePoints: intQuery(req.query.curve, 500),
-      ...excludeQuery(req.query.exclude),
-    }),
-  );
+  // Larger-than-cached requests are computed on the spot; the web app asks for 50.
+  if (limit > SUMMARY_LIMIT || curvePoints !== SUMMARY_CURVE) {
+    return res.json(liveSummary(db, hours, { limit, curvePoints, ...f }));
+  }
+  const e = cachedSummary(hours, f);
+  res.json({
+    ...e.value,
+    ranking: { ...e.value.ranking, contracts: e.value.ranking.contracts.slice(0, limit) },
+    computedAtIso: e.computedAtIso,
+    latestBlock: e.block,
+  });
 });
 
 app.get("/api/live/recent", (req, res) => {
@@ -217,25 +310,26 @@ app.get("/api/live/tx/:hash", (req, res) => {
   res.json(row);
 });
 
-// One poller for all SSE clients: check the head every 2s; when it advances,
-// build the payload once and broadcast it.
+// One poller: check the head every 2s. When it advances, refresh the cached
+// summaries (always) and, when SSE clients are connected, build the block
+// payload once and broadcast it.
 const sseClients = new Set<express.Response>();
 let ssePrevBlock = latestBlock(db)?.number ?? null;
 setInterval(() => {
-  if (sseClients.size === 0) {
-    ssePrevBlock = latestBlock(db)?.number ?? ssePrevBlock;
-    return;
-  }
   const lb = latestBlock(db);
   if (!lb || (ssePrevBlock !== null && lb.number <= ssePrevBlock)) return;
-  const newBlocks = ssePrevBlock === null ? 1 : Math.max(1, lb.number - ssePrevBlock);
+  const prev = ssePrevBlock;
+  ssePrevBlock = lb.number;
+  refreshSummariesForBlock();
+  if (sseClients.size === 0) return;
+  const newBlocks = prev === null ? 1 : Math.max(1, lb.number - prev);
+  const s = cachedSummary(24, { excludeEth: false, excludeToken: false }).value;
   const payload = JSON.stringify({
     block: { number: lb.number, hash: lb.hash, timeIso: lb.timeIso, txCount: lb.txCount },
-    txs: recentTxs(db, { limit: 300, sinceBlock: ssePrevBlock ?? lb.number - 1 }),
-    summary: liveSummary(db, 24, { limit: 50 }),
+    txs: recentTxs(db, { limit: 300, sinceBlock: prev ?? lb.number - 1 }),
+    summary: { ...s, ranking: { ...s.ranking, contracts: s.ranking.contracts.slice(0, 50) } },
     blocks: blockStats(db, newBlocks),
   });
-  ssePrevBlock = lb.number;
   for (const c of sseClients) c.write(`event: block\ndata: ${payload}\n\n`);
 }, 2000);
 setInterval(() => {
