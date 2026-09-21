@@ -173,14 +173,18 @@ Live endpoints on the API:
 The window in `summary` ends at the latest processed block, not at wall-clock
 now, so a stopped follower still reports its last complete window.
 
-`summary` and `recent` accept `exclude=eth,token`. `eth` drops plain ETH sends;
-`token` drops every call whose selector is a standard ERC-20/721 transfer or
-approval, whether or not the token has a descriptor (so Tether transfers go
-too). Excluded transactions leave the denominator as well as the numerator:
-`totalTx` shrinks, the ranking baseline shrinks, and `excluded` / `allTx` say
-what was removed. The dashboard excludes both by default and shows a
-disclaimer, because the question it answers is about the calls that need a
-descriptor.
+`summary`, `recent` and `ranking` accept `exclude=eth,token,unverified`. `eth`
+drops plain ETH sends; `token` drops every call whose selector is a standard
+ERC-20/721 transfer or approval, whether or not the token has a descriptor (so
+Tether transfers go too); `unverified` drops the not-covered calls to contracts
+the Sourcify cache knows to be unverified (no source, so no descriptor can be
+written; contracts not yet checked stay in). Excluded transactions leave the
+denominator as well as the numerator: `totalTx` shrinks, the ranking baseline
+shrinks, and `excluded` / `allTx` say what was removed. The dashboard excludes
+ETH and token transfers by default and shows a disclaimer, because the question
+it answers is about the calls that need a descriptor. In the ranking, an
+unverified contract leaves as a whole row (its rare covered calls with it), so
+the page stays an ordered index read.
 
 Each row in `recent` carries `functionSig` and `displayText`. The signature
 comes from the registry descriptor for covered transactions, and from

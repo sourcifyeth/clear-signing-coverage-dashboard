@@ -172,10 +172,12 @@ const SUMMARY_CURVE = 500;
 /** an entry is refreshed on new blocks only while it was requested within this long */
 const SUMMARY_ACTIVE_MS = 10 * 60_000;
 const summaryCache = new Map<string, SummaryEntry>();
-const summaryKey = (hours: number, f: { excludeEth: boolean; excludeToken: boolean }) =>
-  `${hours}|${f.excludeEth ? 1 : 0}|${f.excludeToken ? 1 : 0}`;
+/** The three exclusions a summary can be asked with (see excludeQuery). */
+type Filter = { excludeEth: boolean; excludeToken: boolean; excludeUnverified: boolean };
+const PLAIN: Filter = { excludeEth: false, excludeToken: false, excludeUnverified: false };
+const summaryKey = (hours: number, f: Filter) => `${hours}|${f.excludeEth ? 1 : 0}|${f.excludeToken ? 1 : 0}|${f.excludeUnverified ? 1 : 0}`;
 
-function computeSummary(hours: number, f: { excludeEth: boolean; excludeToken: boolean }, why: string): SummaryEntry {
+function computeSummary(hours: number, f: Filter, why: string): SummaryEntry {
   const t0 = Date.now();
   const block = latestBlock(db)?.number ?? null;
   const value = liveSummary(db, hours, { limit: SUMMARY_LIMIT, curvePoints: SUMMARY_CURVE, ...f });
@@ -188,7 +190,7 @@ function computeSummary(hours: number, f: { excludeEth: boolean; excludeToken: b
 }
 
 /** The cached summary for a request, computed on a miss. */
-function cachedSummary(hours: number, f: { excludeEth: boolean; excludeToken: boolean }): SummaryEntry {
+function cachedSummary(hours: number, f: Filter): SummaryEntry {
   const key = summaryKey(hours, f);
   let e = summaryCache.get(key);
   if (!e) e = computeSummary(hours, f, "miss");
@@ -203,15 +205,13 @@ function cachedSummary(hours: number, f: { excludeEth: boolean; excludeToken: bo
  */
 function refreshSummariesForBlock(): void {
   const now = Date.now();
-  computeSummary(24, { excludeEth: false, excludeToken: false }, "new block");
-  const stale = [...summaryCache.entries()].filter(
-    ([k, e]) => k !== summaryKey(24, { excludeEth: false, excludeToken: false }) && now - e.lastRequestedAt <= SUMMARY_ACTIVE_MS,
-  );
+  computeSummary(24, PLAIN, "new block");
+  const stale = [...summaryCache.entries()].filter(([k, e]) => k !== summaryKey(24, PLAIN) && now - e.lastRequestedAt <= SUMMARY_ACTIVE_MS);
   const step = () => {
     const next = stale.shift();
     if (!next) return;
-    const [hours, eth, token] = next[0].split("|");
-    computeSummary(Number(hours), { excludeEth: eth === "1", excludeToken: token === "1" }, "new block, active");
+    const [hours, eth, token, unv] = next[0].split("|");
+    computeSummary(Number(hours), { excludeEth: eth === "1", excludeToken: token === "1", excludeUnverified: unv === "1" }, "new block, active");
     setImmediate(step);
   };
   setImmediate(step);
@@ -243,25 +243,28 @@ app.get("/api/live/ranking", (req, res) => {
   const hours = WINDOWS[w];
   if (!hours) return res.status(400).json({ error: "window must be 1h, 24h or 7d" });
   if (req.query.by !== undefined && req.query.by !== "contract") return res.status(400).json({ error: "only by=contract is supported" });
+  const f = excludeQuery(req.query.exclude);
   const opts = {
     limit: intQuery(req.query.limit, 100),
     offset: intQuery(req.query.offset, 0),
-    // `verified=only`: contracts the Sourcify cache marks verified
-    verifiedOnly: req.query.verified === "only",
-    ...excludeQuery(req.query.exclude),
+    ...f,
+    // `verified=only` is the older spelling of `exclude=unverified`; kept for one release.
+    excludeUnverified: f.excludeUnverified || req.query.verified === "only",
   } as const;
   res.set("Cache-Control", "no-cache");
   res.json(cachedRanking(`${w}|${JSON.stringify(opts)}`, () => liveRanking(db, hours, opts)));
 });
 
 /**
- * `?exclude=eth,token` leaves wallet-native transactions out of a query:
- * `eth` = plain ETH sends, `token` = standard ERC-20/721 transfer and approval
- * calls, whether or not the token has a descriptor.
+ * `?exclude=eth,token,unverified` leaves kinds of transactions out of a query
+ * (numerator and denominator): `eth` = plain ETH sends, `token` = standard
+ * ERC-20/721 transfer and approval calls, whether or not the token has a
+ * descriptor, `unverified` = not-covered calls to contracts Sourcify knows to
+ * be unverified (no source, so no descriptor can be written).
  */
-function excludeQuery(q: unknown): { excludeEth: boolean; excludeToken: boolean } {
+function excludeQuery(q: unknown): Filter {
   const parts = typeof q === "string" ? q.split(",").map((s) => s.trim()) : [];
-  return { excludeEth: parts.includes("eth"), excludeToken: parts.includes("token") };
+  return { excludeEth: parts.includes("eth"), excludeToken: parts.includes("token"), excludeUnverified: parts.includes("unverified") };
 }
 
 app.get("/api/live/summary", (req, res) => {
@@ -323,7 +326,7 @@ setInterval(() => {
   refreshSummariesForBlock();
   if (sseClients.size === 0) return;
   const newBlocks = prev === null ? 1 : Math.max(1, lb.number - prev);
-  const s = cachedSummary(24, { excludeEth: false, excludeToken: false }).value;
+  const s = cachedSummary(24, PLAIN).value;
   const payload = JSON.stringify({
     block: { number: lb.number, hash: lb.hash, timeIso: lb.timeIso, txCount: lb.txCount },
     txs: recentTxs(db, { limit: 300, sinceBlock: prev ?? lb.number - 1 }),

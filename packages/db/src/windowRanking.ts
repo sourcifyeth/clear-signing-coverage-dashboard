@@ -1,19 +1,24 @@
 /**
- * The "what to build next" ranking per window, computed once per block by the
- * follower and stored in `window_ranking`, so the summary endpoint returns it
- * without walking the long tail on every request.
+ * The "what to build next" ranking per window, computed by the follower (once
+ * a minute, see refreshWindowRankingsIfDue) and stored in `window_ranking`, so
+ * the summary endpoint returns it without walking the long tail on every
+ * request.
  *
  * The not-covered rows never carry a standard token selector (a standard
- * selector on an uncovered contract is bucket token_native), so the sorted
- * list of not-covered contracts is the same under every exclusion. What the
- * exclusions change is the denominator (totalTx) and the baseline, and those
- * are cheap. So one stored row per window holds:
+ * selector on an uncovered contract is bucket token_native), so the ETH and
+ * token exclusions do not change the sorted list of not-covered contracts;
+ * they change the denominator (totalTx) and the baseline, which are cheap.
+ * The unverified exclusion does change the list: contracts Sourcify knows to
+ * be unverified drop out. So one stored row per window holds two variants of
+ * the walk, `all` and `verified` (= without the unverified contracts), each
+ * with:
  *
  *   - the top `TOP_CONTRACTS` not-covered contracts with their selectors,
  *   - the cumulative not-covered call count at sampled ranks (the curve, as
  *     counts, so each exclusion derives its own percentages),
- *   - the 80% / 95% ranks for each of the four exclusion combinations,
- *   - the verification split (unverified calls, checked / total contracts).
+ *   - the 80% / 95% ranks for each of the four ETH/token combinations,
+ *
+ * plus the verification split (unverified calls, checked / total contracts).
  *
  * `windowRankingFor` turns a stored row into the summary's `ranking` block for
  * one exclusion combination; `liveSummary` calls it.
@@ -31,8 +36,9 @@ export const TOP_CONTRACTS = 100;
 export const CURVE_POINTS = 500;
 const TOP_SELECTORS = 5;
 
-export interface StoredRanking {
-  toBlock: number | null;
+export type RankingVariant = "all" | "verified";
+
+export interface StoredRankingVariant {
   /** top not-covered contracts, most calls first; cumulativeTx = not-covered calls up to and including this rank */
   contracts: { toAddress: string; txCount: number; cumulativeTx: number; topSelectors: { selector: string; txCount: number }[] }[];
   totalContracts: number;
@@ -40,6 +46,12 @@ export interface StoredRanking {
   curve: { n: number; cum: number }[];
   /** [excludeEth][excludeToken] -> rank at which the cumulative share first reaches 80 / 95, or null */
   reach: { eth: boolean; token: boolean; r80: number | null; r95: number | null }[];
+}
+
+export interface StoredRanking {
+  toBlock: number | null;
+  /** `all`: every not-covered contract; `verified`: without the ones Sourcify knows to be unverified */
+  variants: Record<RankingVariant, StoredRankingVariant>;
   notCoveredUnverified: number;
   verificationCoverage: { checked: number; total: number };
 }
@@ -48,7 +60,8 @@ export interface StoredRanking {
 export interface WindowTotals {
   buckets: Record<Bucket, number>;
   practice: { passTx: number; partialTx: number; failedTx: number };
-  native: { ethTransfers: number; tokenTransfers: number };
+  /** always measured, before exclusions */
+  native: { ethTransfers: number; tokenTransfers: number; unverifiedCalls: number };
   allTx: number;
   totalTx: number;
 }
@@ -64,19 +77,22 @@ const EMPTY_BUCKETS = (): Record<Bucket, number> => ({
 /**
  * Bucket, practice and native totals of a window under an exclusion, read from
  * `window_counters`: excludeEth zeroes the eth_transfer bucket, excludeToken
- * removes the standard-selector calls from every bucket.
+ * removes the standard-selector calls from every bucket, excludeUnverified
+ * removes the not-covered calls to known-unverified contracts.
  */
 export function windowTotals(db: Db, key: WindowKey, filter: ExcludeOptions): WindowTotals {
   const counters = windowCounters(db, key);
   const meta = windowMeta(db, key);
   const buckets = EMPTY_BUCKETS();
   const practice = { passTx: 0, partialTx: 0, failedTx: 0 };
-  const native = { ethTransfers: 0, tokenTransfers: 0 };
+  const native = { ethTransfers: 0, tokenTransfers: 0, unverifiedCalls: 0 };
   for (const c of counters) {
     if (c.bucket === "eth_transfer") native.ethTransfers += c.txCount;
     native.tokenTransfers += c.stdCount;
+    if (c.bucket === "not_covered") native.unverifiedCalls += c.unvCount;
     if (filter.excludeEth && c.bucket === "eth_transfer") continue;
-    const n = filter.excludeToken ? c.txCount - c.stdCount : c.txCount;
+    let n = filter.excludeToken ? c.txCount - c.stdCount : c.txCount;
+    if (filter.excludeUnverified && c.bucket === "not_covered") n -= c.unvCount;
     if (c.bucket in buckets) buckets[c.bucket as Bucket] += n;
     if (c.bucket === "covered_theory") {
       if (c.status === "pass") practice.passTx += n;
@@ -85,7 +101,11 @@ export function windowTotals(db: Db, key: WindowKey, filter: ExcludeOptions): Wi
     }
   }
   const allTx = meta.txTotal;
-  const totalTx = allTx - (filter.excludeEth ? native.ethTransfers : 0) - (filter.excludeToken ? native.tokenTransfers : 0);
+  const totalTx =
+    allTx -
+    (filter.excludeEth ? native.ethTransfers : 0) -
+    (filter.excludeToken ? native.tokenTransfers : 0) -
+    (filter.excludeUnverified ? native.unverifiedCalls : 0);
   return { buckets, practice, native, allTx, totalTx };
 }
 
@@ -99,31 +119,26 @@ const COMBOS: { eth: boolean; token: boolean }[] = [
 /** Baseline = calls a wallet already shows: covered + token-native + ETH sends (under the exclusion). */
 const baselineOf = (t: WindowTotals) => t.buckets.covered_theory + t.buckets.token_native + t.buckets.eth_transfer;
 
-/** Compute one window's ranking from `window_contracts` (one index-ordered read of the not-covered rows). */
-export function computeWindowRanking(db: Db, key: WindowKey): StoredRanking {
-  const meta = windowMeta(db, key);
-  const rows = db
-    .prepare(
-      "SELECT to_address, not_covered_tx, verified FROM window_contracts WHERE window = ? AND not_covered_tx > 0 ORDER BY not_covered_tx DESC, to_address",
-    )
-    .all(key) as { to_address: string; not_covered_tx: number; verified: number | null }[];
+interface NcRow {
+  to_address: string;
+  not_covered_tx: number;
+  verified: number | null;
+}
 
-  const totals = COMBOS.map((c) => windowTotals(db, key, { excludeEth: c.eth, excludeToken: c.token }));
+/** One variant's walk over a sorted list of not-covered contracts. */
+function walk(db: Db, key: WindowKey, rows: NcRow[], excludeUnverified: boolean): StoredRankingVariant {
+  const totals = COMBOS.map((c) => windowTotals(db, key, { excludeEth: c.eth, excludeToken: c.token, excludeUnverified }));
   const reach = COMBOS.map((c, i) => {
     const t = totals[i];
     const b = pct(baselineOf(t), t.totalTx);
-    return { eth: c.eth, token: c.token, r80: b >= 80 ? 0 : null as number | null, r95: b >= 95 ? 0 : null as number | null };
+    return { eth: c.eth, token: c.token, r80: b >= 80 ? 0 : (null as number | null), r95: b >= 95 ? 0 : (null as number | null) };
   });
 
   let cum = 0;
-  let unverified = 0;
-  let checked = 0;
   const cumAt: number[] = new Array(rows.length);
   rows.forEach((r, i) => {
     cum += r.not_covered_tx;
     cumAt[i] = cum;
-    if (r.verified === 0) unverified += r.not_covered_tx;
-    if (r.verified !== null) checked++;
     for (let k = 0; k < COMBOS.length; k++) {
       const t = totals[k];
       if (reach[k].r80 !== null && reach[k].r95 !== null) continue;
@@ -161,11 +176,40 @@ export function computeWindowRanking(db: Db, key: WindowKey): StoredRanking {
   }
 
   return {
-    toBlock: meta.toBlock,
     contracts: top.map((r, i) => ({ toAddress: r.to_address, txCount: r.not_covered_tx, cumulativeTx: cumAt[i], topSelectors: selsOf.get(r.to_address) ?? [] })),
     totalContracts: rows.length,
     curve,
     reach,
+  };
+}
+
+/** Compute one window's ranking from `window_contracts` (one index-ordered read of the not-covered rows). */
+export function computeWindowRanking(db: Db, key: WindowKey): StoredRanking {
+  const meta = windowMeta(db, key);
+  const rows = db
+    .prepare(
+      "SELECT to_address, not_covered_tx, verified FROM window_contracts WHERE window = ? AND not_covered_tx > 0 ORDER BY not_covered_tx DESC, to_address",
+    )
+    .all(key) as NcRow[];
+
+  let unverified = 0;
+  let checked = 0;
+  for (const r of rows) {
+    if (r.verified === 0) unverified += r.not_covered_tx;
+    if (r.verified !== null) checked++;
+  }
+
+  return {
+    toBlock: meta.toBlock,
+    variants: {
+      all: walk(db, key, rows, false),
+      verified: walk(
+        db,
+        key,
+        rows.filter((r) => r.verified !== 0),
+        true,
+      ),
+    },
     notCoveredUnverified: unverified,
     verificationCoverage: { checked, total: rows.length },
   };
@@ -202,12 +246,17 @@ export function refreshWindowRankings(db: Db): { ms: number } {
   return { ms: Date.now() - t0 };
 }
 
-/** The stored ranking of a window, or null when the follower has not written one yet. */
+/**
+ * The stored ranking of a window, or null when the follower has not written
+ * one yet (or wrote it before the variants existed).
+ */
 export function readWindowRanking(db: Db, key: WindowKey): StoredRanking | null {
   const r = db.prepare("SELECT json FROM window_ranking WHERE window = ? AND exclude_eth = 0 AND exclude_token = 0").get(key) as
     | { json: string }
     | undefined;
-  return r ? (JSON.parse(r.json) as StoredRanking) : null;
+  if (!r) return null;
+  const parsed = JSON.parse(r.json) as Partial<StoredRanking>;
+  return parsed.variants?.all && parsed.variants.verified ? (parsed as StoredRanking) : null;
 }
 
 /** Rebuild the window totals and then the stored rankings (follower start). */
@@ -234,23 +283,24 @@ export function windowRankingFor(
   curve: { n: number; pct: number }[];
   baselinePct: number;
 } {
+  const v = stored.variants[filter.excludeUnverified ? "verified" : "all"];
   const limit = Math.max(1, Math.min(opts.limit ?? TOP_CONTRACTS, TOP_CONTRACTS));
   const maxPoints = Math.max(10, Math.min(opts.curvePoints ?? CURVE_POINTS, 2000));
   const baseline = baselineOf(totals);
   const baselinePct = pct(baseline, totals.totalTx);
-  const reach = stored.reach.find((r) => r.eth === !!filter.excludeEth && r.token === !!filter.excludeToken);
-  const contracts: RankedContract[] = stored.contracts.slice(0, limit).map((c) => ({
+  const reach = v.reach.find((r) => r.eth === !!filter.excludeEth && r.token === !!filter.excludeToken);
+  const contracts: RankedContract[] = v.contracts.slice(0, limit).map((c) => ({
     toAddress: c.toAddress,
     txCount: c.txCount,
     topSelectors: c.topSelectors,
     cumulativePct: pct(baseline + c.cumulativeTx, totals.totalTx),
   }));
   // Same cap rule as rankingCurve, for this combination's reach95.
-  const cap = Math.min(stored.curve.length, Math.max((reach?.r95 ?? 150) + 15, 150));
-  const pts = stored.curve.slice(0, cap).map((p) => ({ n: p.n, pct: pct(baseline + p.cum, totals.totalTx) }));
+  const cap = Math.min(v.curve.length, Math.max((reach?.r95 ?? 150) + 15, 150));
+  const pts = v.curve.slice(0, cap).map((p) => ({ n: p.n, pct: pct(baseline + p.cum, totals.totalTx) }));
   return {
     contracts,
-    totalContracts: stored.totalContracts,
+    totalContracts: v.totalContracts,
     contractsToReach80: reach?.r80 ?? null,
     contractsToReach95: reach?.r95 ?? null,
     curve: [{ n: 0, pct: baselinePct }].concat(downsampleCurve(pts, maxPoints)),

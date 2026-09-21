@@ -26,6 +26,9 @@ export function App() {
   // answers is about the calls that need a descriptor.
   const [countEth, setCountEth] = useState(false);
   const [countToken, setCountToken] = useState(false);
+  // Not-covered calls to contracts without verified source. Included by
+  // default; off, they leave the numbers, since no descriptor can target them.
+  const [countUnverified, setCountUnverified] = useState(true);
   const [modalHash, setModalHash] = useState<string | null>(null);
   const [modalBlock, setModalBlock] = useState<number | null>(null);
 
@@ -41,7 +44,7 @@ export function App() {
       .catch(() => setReport(null));
   }, []);
 
-  const state: ToggleState = { countEth, countToken, setCountEth, setCountToken };
+  const state: ToggleState = { countEth, countToken, countUnverified, setCountEth, setCountToken, setCountUnverified };
 
   return (
     <>
@@ -118,6 +121,7 @@ export function App() {
           number={modalBlock}
           countEth={countEth}
           countToken={countToken}
+          countUnverified={countUnverified}
           onClose={() => setModalBlock(null)}
           onInspect={setModalHash}
         />

@@ -11,9 +11,10 @@ import { BucketBar } from "./BucketBar.tsx";
 import { splitBlock } from "./BlockStrip.tsx";
 import { TickerHeader, TickerRow } from "./LivePanel.tsx";
 
-function hidden(t: LiveTx, countEth: boolean, countToken: boolean): boolean {
+function hidden(t: LiveTx, countEth: boolean, countToken: boolean, countUnverified: boolean): boolean {
   if (!countEth && t.bucket === "eth_transfer") return true;
   if (!countToken && STANDARD_TOKEN_SELECTORS.has(t.selector)) return true;
+  if (!countUnverified && t.bucket === "not_covered" && t.verified === false) return true;
   return false;
 }
 
@@ -40,12 +41,14 @@ export function BlockModal({
   number,
   countEth,
   countToken,
+  countUnverified = true,
   onClose,
   onInspect,
 }: {
   number: number;
   countEth: boolean;
   countToken: boolean;
+  countUnverified?: boolean;
   onClose: () => void;
   onInspect: (hash: string) => void;
 }) {
@@ -70,17 +73,17 @@ export function BlockModal({
     };
   }, [onClose]);
 
-  const excluding = !countEth || !countToken;
+  const excluding = !countEth || !countToken || !countUnverified;
   // Rows carry their block position, then the toggles filter, then
   // clear-signable rows come first (each group in block order).
   const visible = useMemo<IndexedTx[]>(() => {
     if (!detail) return [];
     const all = detail.txs.map((tx, index) => ({ tx, index }));
-    const kept = showAll || !excluding ? all : all.filter((r) => !hidden(r.tx, countEth, countToken));
+    const kept = showAll || !excluding ? all : all.filter((r) => !hidden(r.tx, countEth, countToken, countUnverified));
     const yes = kept.filter((r) => signable(r.tx, countEth, countToken));
     const no = kept.filter((r) => !signable(r.tx, countEth, countToken));
     return yes.concat(no);
-  }, [detail, showAll, excluding, countEth, countToken]);
+  }, [detail, showAll, excluding, countEth, countToken, countUnverified]);
 
   return (
     <div className="modalOverlay" onClick={onClose} role="dialog" aria-modal="true">
@@ -96,7 +99,16 @@ export function BlockModal({
             <p className="muted small">It is older than the retention window, or it landed while the follower was down.</p>
           </>
         ) : (
-          <Body detail={detail} countEth={countEth} countToken={countToken} visible={visible} showAll={showAll} setShowAll={setShowAll} onInspect={onInspect} />
+          <Body
+            detail={detail}
+            countEth={countEth}
+            countToken={countToken}
+            countUnverified={countUnverified}
+            visible={visible}
+            showAll={showAll}
+            setShowAll={setShowAll}
+            onInspect={onInspect}
+          />
         )}
       </div>
     </div>
@@ -107,6 +119,7 @@ function Body({
   detail,
   countEth,
   countToken,
+  countUnverified,
   visible,
   showAll,
   setShowAll,
@@ -115,24 +128,28 @@ function Body({
   detail: BlockDetail;
   countEth: boolean;
   countToken: boolean;
+  countUnverified: boolean;
   visible: IndexedTx[];
   showAll: boolean;
   setShowAll: (v: boolean) => void;
   onInspect: (hash: string) => void;
 }) {
   const { block, stat, txs } = detail;
-  const split = splitBlock(stat, countEth, countToken);
-  const excluding = !countEth || !countToken;
-  const hiddenCount = txs.length - txs.filter((t) => !hidden(t, countEth, countToken)).length;
-  // The strip's breakdown as a Buckets object for the bar: "token" is every
-  // standard token call (covered or not), "covered" the rest of the covered ones.
+  const split = splitBlock(stat, countEth, countToken, countUnverified);
+  const excluding = !countEth || !countToken || !countUnverified;
+  const hiddenCount = txs.length - txs.filter((t) => !hidden(t, countEth, countToken, countUnverified)).length;
+  const unv = stat.notCoveredUnverified ?? 0;
+  // The strip's breakdown as a Buckets object for the bar, under the toggles:
+  // "token" is every standard token call (covered or not), "covered" the rest
+  // of the covered ones; an excluded kind is left out, as on the main bar.
   const buckets: Buckets = {
     covered_theory: stat.coveredOther,
-    eth_transfer: stat.eth,
-    token_native: stat.tokenStd,
-    not_covered: stat.notCovered,
+    eth_transfer: countEth ? stat.eth : 0,
+    token_native: countToken ? stat.tokenStd : 0,
+    not_covered: stat.notCovered - (countUnverified ? 0 : unv),
     contract_creation: stat.creation,
   };
+  const barTotal = stat.total - (countEth ? 0 : stat.eth) - (countToken ? 0 : stat.tokenStd) - (countUnverified ? 0 : unv);
   const when = block.timeIso.replace("T", " ").replace(".000Z", " UTC");
 
   return (
@@ -164,9 +181,9 @@ function Body({
         </div>
         <div className="blockStat">
           <div className="statVal">
-            {fmtInt(stat.notCovered)} <Unit n={stat.notCovered} />
+            {fmtInt(buckets.not_covered)} <Unit n={buckets.not_covered} />
           </div>
-          <div className="statLbl muted">not covered</div>
+          <div className="statLbl muted">not covered{!countUnverified && unv > 0 && ` · ${fmtInt(unv)} to unverified contracts excluded`}</div>
         </div>
         <div className="blockStat">
           <div className="statVal">
@@ -176,14 +193,14 @@ function Body({
         </div>
       </div>
 
-      <BucketBar buckets={buckets} total={stat.total} unverified={stat.notCoveredUnverified} />
+      <BucketBar buckets={buckets} total={barTotal} unverified={countUnverified ? stat.notCoveredUnverified : undefined} />
 
       <div className="tickerHead muted small" style={{ marginTop: 18 }}>
         Transactions in this block — click one for details
         {excluding && hiddenCount > 0 && (
           <>
             {" "}
-            · {fmtInt(hiddenCount)} ETH / token transfers{" "}
+            · {fmtInt(hiddenCount)} excluded transaction{hiddenCount === 1 ? "" : "s"}{" "}
             {showAll ? (
               <button className="linkBtn" onClick={() => setShowAll(false)}>
                 hide

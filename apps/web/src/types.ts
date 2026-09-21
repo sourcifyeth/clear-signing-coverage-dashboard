@@ -84,11 +84,11 @@ export interface LiveSummary {
   totalTx: number;
   /** every transaction in the window, before exclusions */
   allTx: number;
-  filter: { excludeEth: boolean; excludeToken: boolean };
-  /** wallet-native counts, always measured */
-  native: { ethTransfers: number; tokenTransfers: number };
+  filter: { excludeEth: boolean; excludeToken: boolean; excludeUnverified?: boolean };
+  /** always measured, before exclusions (unverifiedCalls absent on an older API) */
+  native: { ethTransfers: number; tokenTransfers: number; unverifiedCalls?: number };
   /** the part of `native` removed from totalTx by the filter */
-  excluded: { ethTransfers: number; tokenTransfers: number };
+  excluded: { ethTransfers: number; tokenTransfers: number; unverified?: number };
   buckets: Buckets;
   /** part of buckets.not_covered whose target Sourcify knows to be unverified (absent on an older API) */
   notCoveredUnverified?: number;

@@ -222,16 +222,21 @@ export interface LiveSummary {
   totalTx: number;
   /** every transaction in the window, before exclusions */
   allTx: number;
-  filter: { excludeEth: boolean; excludeToken: boolean };
-  /** wallet-native counts in the window, always measured: plain ETH sends, and standard token calls (covered or not) */
-  native: { ethTransfers: number; tokenTransfers: number };
+  filter: { excludeEth: boolean; excludeToken: boolean; excludeUnverified: boolean };
+  /**
+   * Always measured, before exclusions: plain ETH sends, standard token calls
+   * (covered or not), and not-covered calls to contracts Sourcify knows to be
+   * unverified.
+   */
+  native: { ethTransfers: number; tokenTransfers: number; unverifiedCalls: number };
   /** the part of `native` the filter removed from totalTx */
-  excluded: { ethTransfers: number; tokenTransfers: number };
+  excluded: { ethTransfers: number; tokenTransfers: number; unverified: number };
   buckets: Record<Bucket, number>;
   /**
    * Part of buckets.not_covered whose target the Sourcify cache knows to be
    * unverified (no ABI, so no descriptor can be written). Contracts not yet
-   * checked count as verified here, so this is a lower bound.
+   * checked count as verified here, so this is a lower bound. 0 when the
+   * filter excludes them (they are no longer in buckets.not_covered).
    */
   notCoveredUnverified: number;
   /** how much of the not-covered contract set the verification cache has classified */
@@ -266,7 +271,7 @@ export function liveSummary(
   const key = windowKeyForHours(windowHours);
   const meta = windowMeta(db, key);
   const { fromIso, toIso } = windowBounds(meta, latestBlock(db)?.timeIso ?? new Date().toISOString());
-  const filter = { excludeEth: !!opts.excludeEth, excludeToken: !!opts.excludeToken };
+  const filter = { excludeEth: !!opts.excludeEth, excludeToken: !!opts.excludeToken, excludeUnverified: !!opts.excludeUnverified };
 
   // Everything comes from the follower's per-window tables: the counters for
   // the totals, the stored ranking for the long-tail walk. No scan of
@@ -282,6 +287,7 @@ export function liveSummary(
   const excluded = {
     ethTransfers: filter.excludeEth ? native.ethTransfers : 0,
     tokenTransfers: filter.excludeToken ? native.tokenTransfers : 0,
+    unverified: filter.excludeUnverified ? native.unverifiedCalls : 0,
   };
   const contractCalls = totalTx - buckets.eth_transfer - buckets.contract_creation;
 
@@ -296,7 +302,8 @@ export function liveSummary(
     native,
     excluded,
     buckets,
-    notCoveredUnverified: stored.notCoveredUnverified,
+    // From the per-block counter (exact); the stored ranking's copy lags a minute.
+    notCoveredUnverified: filter.excludeUnverified ? 0 : native.unverifiedCalls,
     verificationCoverage: stored.verificationCoverage,
     headline: {
       theoryPctOfAll: pct(buckets.covered_theory, totalTx),
@@ -678,31 +685,28 @@ export interface LiveRanking {
 export function liveRanking(
   db: Db,
   windowHours: number,
-  opts: { limit?: number; offset?: number; chainId?: number; verifiedOnly?: boolean } & ExcludeOptions,
+  opts: { limit?: number; offset?: number; chainId?: number } & ExcludeOptions,
 ): LiveRanking {
   const key = windowKeyForHours(windowHours);
   const { fromIso, toIso } = windowBounds(windowMeta(db, key), latestBlock(db)?.timeIso ?? new Date().toISOString());
   const limit = Math.max(1, Math.min(opts.limit ?? 100, 1000));
   const offset = Math.max(0, Math.floor(opts.offset ?? 0));
   const chainId = opts.chainId ?? 1;
-  // `verified=only`: keep contracts the Sourcify cache marks verified. The chain
-  // id is embedded as a literal so the positional params stay (from, to, ...).
-  const verifiedSql = opts.verifiedOnly
-    ? ` AND to_address IN (SELECT address FROM contracts WHERE chain_id = ${Math.floor(Number(chainId))} AND verified = 1)`
-    : "";
   // The per-selector query joins coverage/signatures, so the window_groups
   // columns are qualified (those tables have a `selector` column too).
-  const whereG = `g.window = ? AND g.bucket IN ${CALL_BUCKETS_SQL}${excludeSql(opts, "g")}${verifiedSql.replace("to_address", "g.to_address")}`;
+  const whereG = `g.window = ? AND g.bucket IN ${CALL_BUCKETS_SQL}${excludeSql(opts, "g")}`;
   const window = { hours: windowHours, fromIso, toIso };
   const page = { offset, limit };
 
   // Contract pages come from window_contracts through its (window, count)
   // indexes: no grouping of window_groups. excludeToken switches to the
   // tx_ex_token column (standard-selector calls left out); excludeEth changes
-  // nothing here, since ETH sends are not contract calls.
+  // nothing here, since ETH sends are not contract calls. excludeUnverified
+  // drops the contracts Sourcify knows to be unverified as whole rows (their
+  // rare covered calls with them), so the page stays an ordered index read.
   const col = opts.excludeToken ? "tx_ex_token" : "tx_count";
   const covCol = opts.excludeToken ? "covered_ex_token" : "covered_tx";
-  const wc = `window = ? AND ${col} > 0${opts.verifiedOnly ? " AND verified = 1" : ""}`;
+  const wc = `window = ? AND ${col} > 0${opts.excludeUnverified ? " AND COALESCE(verified, 1) <> 0" : ""}`;
   const agg = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(${col}), 0) AS tx FROM window_contracts WHERE ${wc}`).get(key) as { n: number; tx: number };
   const total = agg.n;
   const totalTx = agg.tx;

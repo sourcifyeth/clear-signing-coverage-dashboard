@@ -92,8 +92,8 @@ export const STANDARD_TOKEN_SELECTORS = new Set<string>([
   "0xa22cb465",
 ]);
 
-/** `?exclude=` value for the API from the two toggles ("" when nothing is excluded). */
-export function excludeParam(countEth: boolean, countToken: boolean): string {
-  const parts = [!countEth && "eth", !countToken && "token"].filter(Boolean);
+/** `?exclude=` value for the API from the three toggles ("" when nothing is excluded). */
+export function excludeParam(countEth: boolean, countToken: boolean, countUnverified = true): string {
+  const parts = [!countEth && "eth", !countToken && "token", !countUnverified && "unverified"].filter(Boolean);
   return parts.length ? `&exclude=${parts.join(",")}` : "";
 }

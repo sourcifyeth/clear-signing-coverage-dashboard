@@ -2053,17 +2053,6 @@ footer {
   gap: 12px;
   flex-wrap: wrap;
 }
-.rankHead .verifiedOnly {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.rankHead .verifiedOnly input {
-  accent-color: var(--blue);
-}
 
 /* block strip: the unverified part of the red sits at the top of the column */
 .stripRestUnv {
@@ -2100,45 +2089,6 @@ footer {
 }
 
 /* ranking: the verified-only filter as a small control strip right above the table */
-.tblFilter {
-  display: flex;
-  align-items: center;
-  margin: 10px 0 8px;
-}
-.tblFilter .verifiedOnly {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 12px 5px 9px;
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  background: #fff;
-  color: var(--text-soft);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  user-select: none;
-  transition: border-color 0.12s, background 0.12s;
-}
-.tblFilter .verifiedOnly:hover {
-  border-color: var(--blue);
-}
-.tblFilter .verifiedOnly.on {
-  border-color: var(--blue-200);
-  background: var(--blue-100);
-  color: var(--blue);
-}
-.tblFilter .verifiedOnly input {
-  accent-color: var(--blue);
-  margin: 0;
-  width: 14px;
-  height: 14px;
-}
-.tblFilter .verifiedOnly img {
-  width: 14px;
-  height: 14px;
-  display: block;
-}
 
 /* (i) marker with an instant tooltip, next to a control */
 .infoTip {
@@ -2191,4 +2141,11 @@ footer {
 .infoTip[data-tip]:hover::after,
 .infoTip[data-tip]:focus-visible::after {
   white-space: pre-line;
+}
+
+/* the (i) marker inside the ranking caption: regular weight, mid-aligned */
+.rankHead h3 .infoTip {
+  font-weight: 400;
+  vertical-align: middle;
+  margin-left: 8px;
 }

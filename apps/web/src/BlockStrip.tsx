@@ -15,24 +15,34 @@ export interface BlockSplit {
   counted: number;
   signable: number;
   pct: number;
+  /** not-covered calls to known-unverified contracts that are still counted (0 when excluded) */
+  unverified: number;
 }
 
-/** Split a block by the toggles: what is counted, and how much of it is clear-signable. */
-export function splitBlock(b: BlockStat, countEth: boolean, countToken: boolean): BlockSplit {
-  const counted = b.total - (countEth ? 0 : b.eth) - (countToken ? 0 : b.tokenStd);
+/**
+ * Split a block by the toggles: what is counted, and how much of it is
+ * clear-signable. An excluded kind leaves the denominator: ETH sends, standard
+ * token calls, and not-covered calls to contracts Sourcify knows to be
+ * unverified. `unverified` = the part of the not-covered calls still counted.
+ */
+export function splitBlock(b: BlockStat, countEth: boolean, countToken: boolean, countUnverified = true): BlockSplit {
+  const unv = b.notCoveredUnverified ?? 0;
+  const counted = b.total - (countEth ? 0 : b.eth) - (countToken ? 0 : b.tokenStd) - (countUnverified ? 0 : unv);
   const signable = b.coveredOther + (countToken ? b.tokenStd : 0) + (countEth ? b.eth : 0);
-  return { counted, signable, pct: counted > 0 ? (signable / counted) * 100 : 0 };
+  return { counted, signable, pct: counted > 0 ? (signable / counted) * 100 : 0, unverified: countUnverified ? unv : 0 };
 }
 
 export function BlockStrip({
   blocks,
   countEth,
   countToken,
+  countUnverified = true,
   onOpen,
 }: {
   blocks: BlockStat[];
   countEth: boolean;
   countToken: boolean;
+  countUnverified?: boolean;
   /** click on a column */
   onOpen?: (blockNumber: number) => void;
 }) {
@@ -43,10 +53,10 @@ export function BlockStrip({
   if (blocks.length === 0) return null;
 
   const last = blocks[blocks.length - 1];
-  const lastSplit = splitBlock(last, countEth, countToken);
-  const what = countEth && countToken ? "transactions" : "counted calls";
+  const lastSplit = splitBlock(last, countEth, countToken, countUnverified);
+  const what = countEth && countToken && countUnverified ? "transactions" : "counted calls";
   const shown = hover !== null ? blocks[hover] : last;
-  const shownSplit = hover !== null ? splitBlock(shown, countEth, countToken) : lastSplit;
+  const shownSplit = hover !== null ? splitBlock(shown, countEth, countToken, countUnverified) : lastSplit;
 
   return (
     <div className="strip">
@@ -70,7 +80,7 @@ export function BlockStrip({
 
       <div className="stripBars" onMouseLeave={() => setHover(null)}>
         {blocks.map((b, i) => {
-          const s = splitBlock(b, countEth, countToken);
+          const s = splitBlock(b, countEth, countToken, countUnverified);
           const isLast = i === blocks.length - 1;
           const fresh = b.number > (initialMax.current ?? Infinity);
           return (
@@ -85,11 +95,8 @@ export function BlockStrip({
               aria-label={`block ${b.number}: ${s.signable} of ${s.counted} clear-signable`}
             >
               {/* top: not-covered calls to unverified contracts; then the rest; bottom: clear-signable */}
-              <div className="stripRestUnv" style={{ height: `${s.counted > 0 ? ((b.notCoveredUnverified ?? 0) / s.counted) * 100 : 0}%` }} />
-              <div
-                className="stripRest"
-                style={{ height: `${Math.max(0, 100 - s.pct - (s.counted > 0 ? ((b.notCoveredUnverified ?? 0) / s.counted) * 100 : 0))}%` }}
-              />
+              <div className="stripRestUnv" style={{ height: `${s.counted > 0 ? (s.unverified / s.counted) * 100 : 0}%` }} />
+              <div className="stripRest" style={{ height: `${Math.max(0, 100 - s.pct - (s.counted > 0 ? (s.unverified / s.counted) * 100 : 0))}%` }} />
               <div className="stripSig" style={{ height: `${s.pct}%` }} />
             </div>
           );
@@ -109,9 +116,8 @@ export function BlockStrip({
             <div className="muted">
               {fmtInt(shown.total)} txs · {fmtInt(shown.eth)} ETH · {fmtInt(shown.tokenStd)} token ·{" "}
               {fmtInt(shown.coveredOther)} covered · {fmtInt(shown.notCovered)} not covered
-              {shown.notCoveredUnverified !== undefined && shown.notCoveredUnverified > 0 && (
-                <> ({fmtInt(shown.notCoveredUnverified)} unverified)</>
-              )}
+              {shownSplit.unverified > 0 && <> ({fmtInt(shownSplit.unverified)} unverified)</>}
+              {!countUnverified && (shown.notCoveredUnverified ?? 0) > 0 && <> · {fmtInt(shown.notCoveredUnverified ?? 0)} to unverified contracts excluded</>}
             </div>
           </div>
         )}
@@ -128,9 +134,11 @@ export function BlockStrip({
         <div className="legendItem">
           <span className="swatch" style={{ background: "#ffccd0" }} /> not clear-signable
         </div>
-        <div className="legendItem">
-          <span className="swatch" style={{ background: COLOR.noUnverified, opacity: 0.6 }} /> of which unverified on Sourcify
-        </div>
+        {countUnverified && (
+          <div className="legendItem">
+            <span className="swatch" style={{ background: COLOR.noUnverified, opacity: 0.6 }} /> of which unverified on Sourcify
+          </div>
+        )}
         <div className="legendItem muted">bar height = share of the block's {what}</div>
       </div>
     </div>

@@ -293,4 +293,8 @@ export const ADDED_COLUMNS: { table: string; name: string; ddl: string; backfill
     backfill:
       "UPDATE block_groups SET block_time = COALESCE((SELECT b.block_time FROM blocks b WHERE b.number = block_groups.block_number), '')",
   },
+  // Not-covered calls to contracts Sourcify knows to be unverified (the
+  // `exclude=unverified` denominator). No backfill: the follower rebuilds the
+  // window tables at start.
+  { table: "window_counters", name: "unv_count", ddl: "unv_count INTEGER NOT NULL DEFAULT 0" },
 ];

@@ -22,12 +22,11 @@
  */
 
 import type { Db } from "./index.js";
-import { STANDARD_TOKEN_SELECTORS, STANDARD_TOKEN_SELECTORS_SQL } from "./selectors.js";
+import { STANDARD_TOKEN_SELECTORS, STANDARD_TOKEN_SELECTORS_SQL, LIVE_CHAIN_ID, unverifiedExistsSql } from "./selectors.js";
+
+export { LIVE_CHAIN_ID };
 
 export const WINDOWS = { "1h": 3_600, "24h": 86_400, "7d": 604_800 } as const;
-
-/** The live tables are single-chain (mainnet); the contracts cache is keyed by chain. */
-export const LIVE_CHAIN_ID = 1;
 
 /** Buckets that are calls to a contract; the ranking and window_contracts cover these. */
 export const CALL_BUCKETS = ["covered_theory", "token_native", "not_covered"] as const;
@@ -118,10 +117,13 @@ function stmts(db: Db) {
     ),
     contractDelZero: db.prepare("DELETE FROM window_contracts WHERE window = ? AND to_address = ? AND tx_count <= 0"),
     counterDelta: db.prepare(
-      `INSERT INTO window_counters (window, bucket, status, tx_count, std_count) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(window, bucket, status) DO UPDATE SET tx_count = tx_count + excluded.tx_count, std_count = std_count + excluded.std_count`,
+      `INSERT INTO window_counters (window, bucket, status, tx_count, std_count, unv_count) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(window, bucket, status) DO UPDATE SET tx_count = tx_count + excluded.tx_count,
+         std_count = std_count + excluded.std_count, unv_count = unv_count + excluded.unv_count`,
     ),
     counterDelZero: db.prepare("DELETE FROM window_counters WHERE window = ? AND bucket = ? AND status = ? AND tx_count <= 0"),
+    // Whether a contract is known-unverified, for the not-covered counter's unv_count.
+    isUnverified: db.prepare(`SELECT ${unverifiedExistsSql("?")} AS u`),
     blocksBetweenOlderThan: db.prepare(
       "SELECT number, tx_count FROM blocks WHERE number >= ? AND number <= ? AND block_time < ? ORDER BY number",
     ),
@@ -142,8 +144,18 @@ type Stmts = ReturnType<typeof stmts>;
  */
 function applyBlockGroups(s: Stmts, key: WindowKey, number: number, sign: 1 | -1): void {
   const contracts = new Map<string, { tx: number; ex: number; cov: number; covEx: number; nc: number }>();
-  const counters = new Map<string, { bucket: string; status: string; tx: number; std: number }>();
+  const counters = new Map<string, { bucket: string; status: string; tx: number; std: number; unv: number }>();
   const isCall = new Set<string>(CALL_BUCKETS);
+  // verified = 0 lookups, once per address per call (the not-covered rows only)
+  const unverifiedOf = new Map<string, boolean>();
+  const isUnverified = (addr: string): boolean => {
+    let v = unverifiedOf.get(addr);
+    if (v === undefined) {
+      v = (s.isUnverified.get(addr) as { u: number }).u === 1;
+      unverifiedOf.set(addr, v);
+    }
+    return v;
+  };
   for (const g of s.groupsOf.all(number) as GroupRow[]) {
     const n = sign * g.tx_count;
     if (sign > 0) s.add.run(key, g.to_address, g.selector, g.bucket, g.status, g.tx_count);
@@ -153,9 +165,10 @@ function applyBlockGroups(s: Stmts, key: WindowKey, number: number, sign: 1 | -1
     }
     const std = STANDARD_TOKEN_SELECTORS.has(g.selector);
     const ck = `${g.bucket}|${g.status}`;
-    const c = counters.get(ck) ?? { bucket: g.bucket, status: g.status, tx: 0, std: 0 };
+    const c = counters.get(ck) ?? { bucket: g.bucket, status: g.status, tx: 0, std: 0, unv: 0 };
     c.tx += n;
     if (std) c.std += n;
+    if (g.bucket === "not_covered" && isUnverified(g.to_address)) c.unv += n;
     counters.set(ck, c);
     if (!isCall.has(g.bucket)) continue;
     const a = contracts.get(g.to_address) ?? { tx: 0, ex: 0, cov: 0, covEx: 0, nc: 0 };
@@ -172,7 +185,7 @@ function applyBlockGroups(s: Stmts, key: WindowKey, number: number, sign: 1 | -1
     if (sign < 0) s.contractDelZero.run(key, addr);
   }
   for (const c of counters.values()) {
-    s.counterDelta.run(key, c.bucket, c.status, c.tx, c.std);
+    s.counterDelta.run(key, c.bucket, c.status, c.tx, c.std, c.unv);
     if (sign < 0) s.counterDelZero.run(key, c.bucket, c.status);
   }
 }
@@ -304,10 +317,11 @@ const rebuildDerivedSql = (src: string, contracts: string, counters: string) => 
           (SELECT verified FROM contracts k WHERE k.chain_id = ${LIVE_CHAIN_ID} AND k.address = g.to_address)
    FROM ${src} g WHERE window = ? AND bucket IN ${CALL_BUCKETS_SQL}
    GROUP BY window, to_address`,
-  `INSERT INTO ${counters} (window, bucket, status, tx_count, std_count)
-   SELECT window, bucket, status, SUM(tx_count),
-          SUM(CASE WHEN selector IN (${STANDARD_TOKEN_SELECTORS_SQL}) THEN tx_count ELSE 0 END)
-   FROM ${src} WHERE window = ? GROUP BY window, bucket, status`,
+  `INSERT INTO ${counters} (window, bucket, status, tx_count, std_count, unv_count)
+   SELECT g.window, g.bucket, g.status, SUM(g.tx_count),
+          SUM(CASE WHEN g.selector IN (${STANDARD_TOKEN_SELECTORS_SQL}) THEN g.tx_count ELSE 0 END),
+          SUM(CASE WHEN g.bucket = 'not_covered' AND ${unverifiedExistsSql("g.to_address")} THEN g.tx_count ELSE 0 END)
+   FROM ${src} g WHERE g.window = ? GROUP BY g.window, g.bucket, g.status`,
 ];
 
 /**
@@ -410,7 +424,7 @@ export function checkWindows(db: Db, opts: { maxDiffs?: number } = {}): string[]
     db.exec(
       "CREATE TEMP TABLE expected_contracts (window TEXT, to_address TEXT, tx_count INTEGER, tx_ex_token INTEGER, covered_tx INTEGER, covered_ex_token INTEGER, not_covered_tx INTEGER, verified INTEGER)",
     );
-    db.exec("CREATE TEMP TABLE expected_counters (window TEXT, bucket TEXT, status TEXT, tx_count INTEGER, std_count INTEGER)");
+    db.exec("CREATE TEMP TABLE expected_counters (window TEXT, bucket TEXT, status TEXT, tx_count INTEGER, std_count INTEGER, unv_count INTEGER)");
     for (const sql of rebuildDerivedSql("temp.expected_groups", "temp.expected_contracts", "temp.expected_counters")) db.prepare(sql).run(key);
     const cCols = "window, to_address, tx_count, tx_ex_token, covered_tx, covered_ex_token, not_covered_tx";
     const cDiff = db
@@ -421,7 +435,7 @@ export function checkWindows(db: Db, opts: { maxDiffs?: number } = {}): string[]
       )
       .all(key, key, key, key, max) as { to_address: string; tx_count: number }[];
     for (const r of cDiff) diffs.push(`${key}: window_contracts ${r.to_address} differs (tx_count ${r.tx_count} on one side)`);
-    const kCols = "window, bucket, status, tx_count, std_count";
+    const kCols = "window, bucket, status, tx_count, std_count, unv_count";
     const kDiff = db
       .prepare(
         `SELECT * FROM (SELECT ${kCols} FROM temp.expected_counters WHERE window = ? EXCEPT SELECT ${kCols} FROM window_counters WHERE window = ?)
@@ -445,16 +459,20 @@ export interface WindowCounter {
   bucket: string;
   status: string;
   txCount: number;
+  /** calls with a standard token selector */
   stdCount: number;
+  /** calls to contracts Sourcify knows to be unverified (not_covered rows only) */
+  unvCount: number;
 }
 
 export function windowCounters(db: Db, key: WindowKey): WindowCounter[] {
   return (
-    db.prepare("SELECT bucket, status, tx_count, std_count FROM window_counters WHERE window = ?").all(key) as {
+    db.prepare("SELECT bucket, status, tx_count, std_count, unv_count FROM window_counters WHERE window = ?").all(key) as {
       bucket: string;
       status: string;
       tx_count: number;
       std_count: number;
+      unv_count: number;
     }[]
-  ).map((r) => ({ bucket: r.bucket, status: r.status, txCount: r.tx_count, stdCount: r.std_count }));
+  ).map((r) => ({ bucket: r.bucket, status: r.status, txCount: r.tx_count, stdCount: r.std_count, unvCount: r.unv_count ?? 0 }));
 }

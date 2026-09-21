@@ -10,7 +10,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { BlockStat, LatestBlock, LiveBlockEvent, LiveSummary, LiveTx } from "./types.ts";
-import { STANDARD_TOKEN_SELECTORS, excludeParam, fmtInt, fmtPct, signablePct } from "./buckets.ts";
+import { COLOR, STANDARD_TOKEN_SELECTORS, excludeParam, fmtInt, fmtPct, signablePct } from "./buckets.ts";
+
+/** "a", "a and b", "a, b and c" */
+function joinList(parts: string[]): string {
+  if (parts.length <= 1) return parts.join("");
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
 import { BucketBar, Toggle } from "./BucketBar.tsx";
 import { BlockStrip } from "./BlockStrip.tsx";
 import { RankingPanel } from "./RankingPanel.tsx";
@@ -50,9 +56,11 @@ function isSignable(t: LiveTx): boolean {
 }
 
 /** Is this row hidden by the toggles (and the clear-signable filter)? Mirrors the API's `exclude=` / `signable=` semantics. */
-function hiddenByToggles(t: LiveTx, countEth: boolean, countToken: boolean, signableOnly = false): boolean {
+function hiddenByToggles(t: LiveTx, countEth: boolean, countToken: boolean, signableOnly = false, countUnverified = true): boolean {
   if (!countEth && t.bucket === "eth_transfer") return true;
   if (!countToken && STANDARD_TOKEN_SELECTORS.has(t.selector)) return true;
+  // not covered, and Sourcify knows the contract has no verified source
+  if (!countUnverified && t.bucket === "not_covered" && t.verified === false) return true;
   if (signableOnly && !isSignable(t)) return true;
   return false;
 }
@@ -76,8 +84,11 @@ function saveSignableOnly(v: boolean): void {
 export interface ToggleState {
   countEth: boolean;
   countToken: boolean;
+  /** count not-covered calls to contracts Sourcify knows to be unverified */
+  countUnverified: boolean;
   setCountEth: (v: boolean) => void;
   setCountToken: (v: boolean) => void;
+  setCountUnverified: (v: boolean) => void;
 }
 
 function ago(iso: string, now: number): string {
@@ -132,8 +143,8 @@ export function LivePanel({
   const winRef = useRef<Win>(win);
   const lastFetchRef = useRef(0);
   /** latest toggle state, readable from the SSE handler */
-  const togglesRef = useRef({ countEth: state.countEth, countToken: state.countToken, signableOnly });
-  togglesRef.current = { countEth: state.countEth, countToken: state.countToken, signableOnly };
+  const togglesRef = useRef({ countEth: state.countEth, countToken: state.countToken, countUnverified: state.countUnverified, signableOnly });
+  togglesRef.current = { countEth: state.countEth, countToken: state.countToken, countUnverified: state.countUnverified, signableOnly };
   /** hashes present when the list was last (re)loaded; rows not in here get the entry animation */
   const shownRef = useRef<Set<string> | null>(null);
 
@@ -143,7 +154,7 @@ export function LivePanel({
     return () => clearInterval(id);
   }, []);
 
-  const exclude = () => excludeParam(togglesRef.current.countEth, togglesRef.current.countToken);
+  const exclude = () => excludeParam(togglesRef.current.countEth, togglesRef.current.countToken, togglesRef.current.countUnverified);
 
   async function fetchSummary(w: Win) {
     lastFetchRef.current = Date.now();
@@ -209,7 +220,7 @@ export function LivePanel({
     if (!loaded || !latest) return;
     withBusy(Promise.all([fetchSummary(winRef.current), fetchRecent()]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.countEth, state.countToken]);
+  }, [state.countEth, state.countToken, state.countUnverified]);
 
   // Clear-signable filter: only the list changes, so only the list is refetched.
   useEffect(() => {
@@ -243,7 +254,7 @@ export function LivePanel({
         return { lo, hi };
       });
       if (e.blocks?.length) setBlocks((prev) => mergeBlocks(prev, e.blocks));
-      const plain = togglesRef.current.countEth && togglesRef.current.countToken;
+      const plain = togglesRef.current.countEth && togglesRef.current.countToken && togglesRef.current.countUnverified;
       if (winRef.current === "24h" && plain) setSummary(e.summary);
       else if (Date.now() - lastFetchRef.current > REFETCH_MIN_MS) void fetchSummary(winRef.current);
     });
@@ -257,7 +268,10 @@ export function LivePanel({
   function showPending() {
     const order = new Map<string, number>();
     pending
-      .filter((t) => !hiddenByToggles(t, togglesRef.current.countEth, togglesRef.current.countToken, togglesRef.current.signableOnly))
+      .filter(
+        (t) =>
+          !hiddenByToggles(t, togglesRef.current.countEth, togglesRef.current.countToken, togglesRef.current.signableOnly, togglesRef.current.countUnverified),
+      )
       .forEach((t, i) => order.set(t.hash, i));
     revealRef.current = order;
     setTxs((prev) => mergeTxs(pending, prev));
@@ -274,9 +288,9 @@ export function LivePanel({
 
   const s = summary;
   const total = s?.totalTx ?? 0;
-  const excluding = !state.countEth || !state.countToken;
-  const visibleTxs = txs.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken, signableOnly)).slice(0, TICKER_MAX);
-  const pendingShown = pending.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken, signableOnly));
+  const excluding = !state.countEth || !state.countToken || !state.countUnverified;
+  const visibleTxs = txs.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken, signableOnly, state.countUnverified)).slice(0, TICKER_MAX);
+  const pendingShown = pending.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken, signableOnly, state.countUnverified));
   const pendingVisible = pendingShown.length;
   // "block N" or "blocks N to M": every block since the last render, not only
   // the ones whose rows survive the toggles or the buffer cap.
@@ -319,6 +333,15 @@ export function LivePanel({
                 label={`Include token transfers / approvals · ${fmtInt(s.native.tokenTransfers)}`}
                 swatch="#7693da"
               />
+              {/* only when the API reports the count (older APIs do not) */}
+              {s.native.unverifiedCalls !== undefined && (
+                <Toggle
+                  on={state.countUnverified}
+                  onClick={() => state.setCountUnverified(!state.countUnverified)}
+                  label={`Include unverified contracts · ${fmtInt(s.native.unverifiedCalls)}`}
+                  swatch={COLOR.noUnverified}
+                />
+              )}
             </>
           ) : (
             <span className="toggle chip muted">Loading…</span>
@@ -375,14 +398,16 @@ export function LivePanel({
                     <div className="disclaimer small">
                       Excluding{" "}
                       <b>
-                        {[
-                          !state.countEth && `${fmtInt(s.excluded.ethTransfers)} ETH transfers`,
-                          !state.countToken && `${fmtInt(s.excluded.tokenTransfers)} token transfers / approvals`,
-                        ]
-                          .filter(Boolean)
-                          .join(" and ")}
+                        {joinList(
+                          [
+                            !state.countEth && `${fmtInt(s.excluded.ethTransfers)} ETH transfers`,
+                            !state.countToken && `${fmtInt(s.excluded.tokenTransfers)} token transfers / approvals`,
+                            !state.countUnverified && `${fmtInt(s.excluded.unverified ?? 0)} calls to unverified contracts`,
+                          ].filter((x): x is string => Boolean(x)),
+                        )}
                       </b>
                       .{!state.countToken && " Token transfers to tokens that have a descriptor (for example Tether) are excluded too."}
+                      {!state.countUnverified && " A descriptor needs the contract's source code, so a contract without verified source cannot be clear-signed."}
                     </div>
                   )}
                 </div>
@@ -390,8 +415,8 @@ export function LivePanel({
               </div>
 
               <div className="liveBar">
-                <BucketBar buckets={s.buckets} total={total} unverified={s.notCoveredUnverified} />
-                {s.notCoveredUnverified !== undefined && s.verificationCoverage && s.buckets.not_covered > 0 && (
+                <BucketBar buckets={s.buckets} total={total} unverified={state.countUnverified ? s.notCoveredUnverified : undefined} />
+                {state.countUnverified && s.notCoveredUnverified !== undefined && s.verificationCoverage && s.buckets.not_covered > 0 && (
                   <div className="muted small unverifiedNote">
                     {fmtPct((s.notCoveredUnverified / s.buckets.not_covered) * 100)} of uncovered calls go to contracts that are not
                     verified on Sourcify ({fmtInt(s.verificationCoverage.checked)} of {fmtInt(s.verificationCoverage.total)} uncovered
@@ -400,7 +425,7 @@ export function LivePanel({
                 )}
               </div>
 
-              <BlockStrip blocks={blocks} countEth={state.countEth} countToken={state.countToken} onOpen={onOpenBlock} />
+              <BlockStrip blocks={blocks} countEth={state.countEth} countToken={state.countToken} countUnverified={state.countUnverified} onOpen={onOpenBlock} />
 
               <div className="tickerHead muted small">
                 <span>
@@ -408,7 +433,12 @@ export function LivePanel({
                   {excluding && (
                     <span>
                       {" "}
-                      · {[!state.countEth && "ETH transfers", !state.countToken && "token transfers"].filter(Boolean).join(" and ")}{" "}
+                      ·{" "}
+                      {joinList(
+                        [!state.countEth && "ETH transfers", !state.countToken && "token transfers", !state.countUnverified && "calls to unverified contracts"].filter(
+                          (x): x is string => Boolean(x),
+                        ),
+                      )}{" "}
                       hidden
                     </span>
                   )}
@@ -448,7 +478,7 @@ export function LivePanel({
       {latest && (
         <RankingPanel
           win={win}
-          exclude={excludeParam(state.countEth, state.countToken)}
+          exclude={excludeParam(state.countEth, state.countToken, state.countUnverified)}
           excluding={excluding}
           refreshKey={latest.number}
           onBusy={(d) => setBusy((b) => b + d)}

@@ -11,22 +11,6 @@ import { canonicalSig, clip, contractUrl, fnShort, knownName, REGISTRY_REPO } fr
 
 const REFETCH_MIN_MS = 30_000;
 const PAGE_SIZES = [25, 50, 100] as const;
-const VERIFIED_ONLY_KEY = "ccd.rankingVerifiedOnly";
-
-function loadVerifiedOnly(): boolean {
-  try {
-    return localStorage.getItem(VERIFIED_ONLY_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-function saveVerifiedOnly(v: boolean): void {
-  try {
-    localStorage.setItem(VERIFIED_ONLY_KEY, v ? "1" : "0");
-  } catch {
-    /* storage blocked */
-  }
-}
 
 /** Sourcify verification pill, table-sized. Nothing while the cache has not classified the address. */
 function VerifiedMini({ verified }: { verified: boolean | null | undefined }) {
@@ -65,20 +49,19 @@ export function RankingPanel({
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0]);
-  /** only contracts the Sourcify cache marks verified (remembered per browser) */
-  const [verifiedOnly, setVerifiedOnly] = useState<boolean>(loadVerifiedOnly);
   const lastFetch = useRef(0);
   /** the window+toggles the current page belongs to; null before the first load */
   const loadedFilter = useRef<string | null>(null);
-  const verifiedParam = verifiedOnly ? "&verified=only" : "";
-  const filter = `${win}${exclude}${verifiedParam}`;
+  // `exclude` carries every toggle from the control row, including the
+  // unverified-contracts one; the table follows it like the rest of the page.
+  const filter = `${win}${exclude}`;
 
   async function load(userTriggered: boolean, pg: number, size: number) {
     lastFetch.current = Date.now();
     setLoading(true);
     if (userTriggered) onBusy?.(1);
     try {
-      const r = await fetch(`/api/live/ranking?window=${win}&by=contract&limit=${size}&offset=${pg * size}${exclude}${verifiedParam}`);
+      const r = await fetch(`/api/live/ranking?window=${win}&limit=${size}&offset=${pg * size}${exclude}`);
       if (r.ok) {
         // An API older than the paging change returns neither `offset` nor
         // `total`; keep the requested offset so ranks never turn into NaN.
@@ -123,12 +106,26 @@ export function RankingPanel({
   return (
     <section className="card">
       <div className="rankHead">
-        <h3>Contracts by transaction count · last {win}</h3>
+        <h3>
+          Contracts by transaction count · last {win}
+          <span
+            className="infoTip"
+            tabIndex={0}
+            data-tip={
+              "Verified source code is a precondition for clear signing.\n\n" +
+              "A descriptor describes the contract's functions and their parameters, which needs the ABI from the source. " +
+              "A bytecode-only contract has no known functions to describe, so there is nothing to clear-sign.\n\n" +
+              "Use \"Include unverified contracts\" in the control row above to leave those contracts out of this table and of every number on the page."
+            }
+          >
+            i
+          </span>
+        </h3>
       </div>
       <p className="muted small">
         Every contract called in the window, most transactions first. ✅ has an ERC-7730 descriptor
         for the call, ❌ does not.
-        {excluding && " ETH and standard token transfers are left out, as set above."}
+        {excluding && " Excluded kinds (see the control row above) are left out."}
         {data && (
           <>
             {" "}
@@ -136,33 +133,6 @@ export function RankingPanel({
           </>
         )}
       </p>
-
-      <div className="tblFilter">
-        <label className={`verifiedOnly ${verifiedOnly ? "on" : ""}`} title="Hide contracts that are not verified on Sourcify (no ABI, so no descriptor can be written)">
-          <input
-            type="checkbox"
-            checked={verifiedOnly}
-            onChange={(e) => {
-              setVerifiedOnly(e.target.checked);
-              saveVerifiedOnly(e.target.checked);
-              setPage(0);
-            }}
-          />
-          <img src="/sourcify.png" alt="" />
-          Verified on Sourcify only
-        </label>
-        <span
-          className="infoTip"
-          tabIndex={0}
-          data-tip={
-            "Verified source code is a precondition for clear signing.\n\n" +
-            "A descriptor describes the contract's functions and their parameters, which needs the ABI from the source.\n\n" +
-            "A bytecode-only contract has no known functions to describe, so there is nothing to clear-sign."
-          }
-        >
-          i
-        </span>
-      </div>
 
       {!data ? (
         <div className="muted small">{loading ? "Loading…" : "No data yet."}</div>
