@@ -174,7 +174,10 @@ const SUMMARY_ACTIVE_MS = 10 * 60_000;
 const summaryCache = new Map<string, SummaryEntry>();
 /** The three exclusions a summary can be asked with (see excludeQuery). */
 type Filter = { excludeEth: boolean; excludeToken: boolean; excludeUnverified: boolean };
-const PLAIN: Filter = { excludeEth: false, excludeToken: false, excludeUnverified: false };
+// The web app's default toggles: ETH transfers, standard token calls and calls
+// to unverified contracts all excluded. The SSE block event carries this
+// combination's 24h summary, so a tab with the defaults never has to refetch.
+const DEFAULT_FILTER: Filter = { excludeEth: true, excludeToken: true, excludeUnverified: true };
 const summaryKey = (hours: number, f: Filter) => `${hours}|${f.excludeEth ? 1 : 0}|${f.excludeToken ? 1 : 0}|${f.excludeUnverified ? 1 : 0}`;
 
 function computeSummary(hours: number, f: Filter, why: string): SummaryEntry {
@@ -199,14 +202,14 @@ function cachedSummary(hours: number, f: Filter): SummaryEntry {
 }
 
 /**
- * New block: recompute the 24h plain summary now (the SSE payload carries it),
+ * New block: recompute the 24h default-filter summary now (the SSE payload carries it),
  * then the other active entries one per event-loop turn, so requests
  * interleave with the refreshes instead of waiting behind all of them.
  */
 function refreshSummariesForBlock(): void {
   const now = Date.now();
-  computeSummary(24, PLAIN, "new block");
-  const stale = [...summaryCache.entries()].filter(([k, e]) => k !== summaryKey(24, PLAIN) && now - e.lastRequestedAt <= SUMMARY_ACTIVE_MS);
+  computeSummary(24, DEFAULT_FILTER, "new block");
+  const stale = [...summaryCache.entries()].filter(([k, e]) => k !== summaryKey(24, DEFAULT_FILTER) && now - e.lastRequestedAt <= SUMMARY_ACTIVE_MS);
   const step = () => {
     const next = stale.shift();
     if (!next) return;
@@ -326,7 +329,7 @@ setInterval(() => {
   refreshSummariesForBlock();
   if (sseClients.size === 0) return;
   const newBlocks = prev === null ? 1 : Math.max(1, lb.number - prev);
-  const s = cachedSummary(24, PLAIN).value;
+  const s = cachedSummary(24, DEFAULT_FILTER).value;
   const payload = JSON.stringify({
     block: { number: lb.number, hash: lb.hash, timeIso: lb.timeIso, txCount: lb.txCount },
     txs: recentTxs(db, { limit: 300, sinceBlock: prev ?? lb.number - 1 }),

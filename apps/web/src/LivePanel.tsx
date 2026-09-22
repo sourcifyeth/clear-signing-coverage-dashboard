@@ -254,8 +254,10 @@ export function LivePanel({
         return { lo, hi };
       });
       if (e.blocks?.length) setBlocks((prev) => mergeBlocks(prev, e.blocks));
-      const plain = togglesRef.current.countEth && togglesRef.current.countToken && togglesRef.current.countUnverified;
-      if (winRef.current === "24h" && plain) setSummary(e.summary);
+      // The event carries the 24h summary for the default toggles (all three
+      // kinds excluded); any other combination is refetched instead.
+      const isDefault = !togglesRef.current.countEth && !togglesRef.current.countToken && !togglesRef.current.countUnverified;
+      if (winRef.current === "24h" && isDefault) setSummary(e.summary);
       else if (Date.now() - lastFetchRef.current > REFETCH_MIN_MS) void fetchSummary(winRef.current);
     });
     return () => es.close();

@@ -26,9 +26,10 @@ export function App() {
   // answers is about the calls that need a descriptor.
   const [countEth, setCountEth] = useState(false);
   const [countToken, setCountToken] = useState(false);
-  // Not-covered calls to contracts without verified source. Included by
-  // default; off, they leave the numbers, since no descriptor can target them.
-  const [countUnverified, setCountUnverified] = useState(true);
+  // Not-covered calls to contracts without verified source are excluded by
+  // default: no descriptor can target a contract whose source is unknown, so
+  // they are not part of the question the dashboard answers.
+  const [countUnverified, setCountUnverified] = useState(false);
   const [modalHash, setModalHash] = useState<string | null>(null);
   const [modalBlock, setModalBlock] = useState<number | null>(null);
 
