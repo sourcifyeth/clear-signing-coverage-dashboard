@@ -1482,7 +1482,7 @@ footer {
   text-decoration: underline;
 }
 .heroWrap {
-  margin-bottom: 0;
+  margin-bottom: 8px;
 }
 .heroWrap .disclaimer {
   max-width: 720px;
