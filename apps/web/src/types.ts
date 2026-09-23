@@ -137,6 +137,8 @@ export interface LiveTxDetail extends LiveTx {
   blockHash: string | null;
   /** a DisplayModel, or { truncated: true, intent, interpolatedIntent, warnings, fieldCount } */
   display: unknown | null;
+  /** true when the API classified it from the node just now (not in the live index) */
+  onDemand?: boolean;
 }
 
 /** /api/live/blocks — one block's bucket breakdown. */
@@ -168,6 +170,8 @@ export interface BlockDetail {
   block: LatestBlock;
   stat: BlockStat;
   txs: LiveTx[];
+  /** true when the API classified it from the node just now (not in the live index) */
+  onDemand?: boolean;
 }
 
 export interface LiveLatest {

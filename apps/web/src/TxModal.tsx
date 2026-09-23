@@ -190,13 +190,13 @@ export function TxModal({ hash, onClose }: { hash: string; onClose: () => void }
           <div className="muted small">Loading…</div>
         ) : row === null ? (
           <>
-            <h3>Transaction not in the live index</h3>
+            <h3>Transaction not found</h3>
             <p className="muted small">
-              The follower has no row for{" "}
+              The node has no mined transaction{" "}
               <a className="mono" href={`https://etherscan.io/tx/${hash}`} target="_blank" rel="noreferrer">
                 {hash.slice(0, 10)}…{hash.slice(-6)}
               </a>
-              . It is older than the retention window, or it landed while the follower was down.
+              . It may still be pending, or the hash may be wrong.
             </p>
           </>
         ) : (
@@ -250,6 +250,11 @@ function TxBody({ row }: { row: LiveTxDetail }) {
           </div>
           <div className="muted small">
             block {fmtInt(row.blockNumber)} · {row.blockTimeIso.replace("T", " ").replace(".000Z", " UTC")}
+            {row.onDemand && (
+              <span className="onDemand" title="This transaction is outside the 7-day live index. The API fetched it from the node and classified it just now; it is not part of the window statistics.">
+                {" "}· classified on demand
+              </span>
+            )}
           </div>
         </div>
       </div>

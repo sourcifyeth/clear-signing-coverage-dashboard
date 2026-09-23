@@ -95,8 +95,8 @@ export function BlockModal({
           <div className="muted small">Loading…</div>
         ) : detail === null ? (
           <>
-            <h3>Block {fmtInt(number)} is not in the live index</h3>
-            <p className="muted small">It is older than the retention window, or it landed while the follower was down.</p>
+            <h3>Block {fmtInt(number)} not found</h3>
+            <p className="muted small">The node has no block with this number yet, or it did not answer in time.</p>
           </>
         ) : (
           <Body
@@ -162,6 +162,11 @@ function Body({
             <a href={`https://etherscan.io/block/${block.number}`} target="_blank" rel="noreferrer" title={`block hash ${block.hash}`}>
               Explorer ↗
             </a>
+            {detail.onDemand && (
+              <span className="onDemand" title="This block is outside the 7-day live index. The API fetched it from the node and classified every transaction just now; it is not part of the window statistics.">
+                {" "}· classified on demand
+              </span>
+            )}
           </div>
         </div>
       </div>

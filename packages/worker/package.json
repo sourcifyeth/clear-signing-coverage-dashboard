@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "description": "Stages B/C: aggregate Ethereum transactions from BigQuery, join the coverage set, and run the practical clear-signing check.",
   "type": "module",
+  "exports": {
+    "./live": "./src/live/index.ts"
+  },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "bq:check": "tsx src/bq/check.ts"

@@ -61,6 +61,7 @@ import {
   type LiveRanking,
 } from "@ccd/db";
 import { makeRpc, rpcFromEnv } from "@ccd/rpc";
+import { createOnDemand } from "./onDemand.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
@@ -142,13 +143,23 @@ app.get("/api/live/blocks", (req, res) => {
 });
 
 // One block: header, breakdown, and all of its stored transaction rows.
-app.get("/api/live/block/:number", (req, res) => {
+app.get("/api/live/block/:number", async (req, res) => {
   const n = Number(req.params.number);
   if (!Number.isInteger(n) || n < 0) return res.status(400).json({ error: "invalid block number" });
   const d = blockDetail(db, n);
-  if (!d) return res.status(404).json({ error: "block not in the live index" });
-  res.set("Cache-Control", "no-cache");
-  res.json(d);
+  if (d) {
+    res.set("Cache-Control", "no-cache");
+    return res.json(d);
+  }
+  // Outside the live index: classify the block from the node, just for this answer.
+  try {
+    const od = await onDemand.block(n);
+    if (!od) return res.status(404).json({ error: "block not found on the node" });
+    res.set("Cache-Control", "public, max-age=600");
+    res.json(od);
+  } catch (e) {
+    res.status(502).json({ error: `RPC request failed: ${(e as Error).message}` });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -157,6 +168,10 @@ app.get("/api/live/block/:number", (req, res) => {
 // computed at most once per block and served from memory until the next one.
 
 const log = (msg: string) => process.stderr.write(`${new Date().toISOString()} api: ${msg}\n`);
+
+// Transactions and blocks outside the live index are classified from the node
+// on request (see onDemand.ts). Answers are cached in memory only.
+const onDemand = createOnDemand({ db, rpc, chainId: 1, registryPath: REGISTRY_PATH, log });
 
 /** Summaries: one entry per (window, excludeEth, excludeToken); 12 at most. */
 interface SummaryEntry {
@@ -307,13 +322,23 @@ app.get("/api/live/recent", (req, res) => {
 });
 
 // A stored transaction with the library result the follower recorded.
-app.get("/api/live/tx/:hash", (req, res) => {
+app.get("/api/live/tx/:hash", async (req, res) => {
   const hash = String(req.params.hash).trim();
   if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) return res.status(400).json({ error: "invalid tx hash" });
   const row = liveTx(db, hash);
-  if (!row) return res.status(404).json({ error: "transaction not in the live index" });
-  res.set("Cache-Control", "no-cache");
-  res.json(row);
+  if (row) {
+    res.set("Cache-Control", "no-cache");
+    return res.json(row);
+  }
+  // Outside the live index: classify the transaction from the node, just for this answer.
+  try {
+    const od = await onDemand.tx(hash);
+    if (!od) return res.status(404).json({ error: "transaction not found on the node (or still pending)" });
+    res.set("Cache-Control", "public, max-age=3600");
+    res.json(od);
+  } catch (e) {
+    res.status(502).json({ error: `RPC request failed: ${(e as Error).message}` });
+  }
 });
 
 // One poller: check the head every 2s. When it advances, refresh the cached

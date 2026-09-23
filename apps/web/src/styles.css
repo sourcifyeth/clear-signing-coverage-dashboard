@@ -2271,6 +2271,14 @@ footer {
   accent-color: var(--blue);
   margin: 0;
 }
+/* "classified on demand" note in a modal header: the item is outside the live index */
+.onDemand {
+  color: var(--amber-text);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
 /* section title inside the live card (Blocks, Transactions) with its lookup box */
 .secHead {
   display: flex;

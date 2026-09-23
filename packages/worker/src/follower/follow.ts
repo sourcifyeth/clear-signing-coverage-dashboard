@@ -37,9 +37,6 @@
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { format } from "@ethereum-sourcify/clear-signing";
-import { createFilesystemResolver } from "@ethereum-sourcify/clear-signing/filesystem";
-import type { DisplayModel, ExternalDataProvider } from "@ethereum-sourcify/clear-signing";
 import {
   openDb,
   defaultDbPath,
@@ -57,14 +54,11 @@ import {
   type LiveTxIn,
   type BlockGroupIn,
 } from "@ccd/db";
-import { loadCoverageLookup, type CoverageLookup } from "../coverage/loadCoverageSet.js";
-import { loadRegistryIndex } from "../coverage/registryIndex.js";
-import { bucketFor } from "../classify.js";
-import { classifyModel, intentToString } from "../practical.js";
-import { makeRpc, rpcFromEnv, type RpcBlock, type RpcTx } from "@ccd/rpc";
+import { loadCoverageLookup } from "../coverage/loadCoverageSet.js";
+import { createLiveClassifier } from "../live/index.js";
+import { makeRpc, rpcFromEnv, type RpcBlock } from "@ccd/rpc";
 import { SignatureCache } from "./signatures.js";
 import { contractSyncEnabled, startContractSync } from "./contractSync.js";
-import { TokenCache, createExternalDataProvider } from "./externalData.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CHAIN_ID = 1;
@@ -85,49 +79,6 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------------------
 // Per-transaction classification
-
-interface Classified {
-  tx: LiveTxIn;
-}
-
-function selectorOf(input: string): string {
-  if (!input || input === "0x") return "0x";
-  return input.length >= 10 ? input.slice(0, 10).toLowerCase() : input.toLowerCase();
-}
-
-async function classifyTx(
-  t: RpcTx,
-  cov: CoverageLookup,
-  resolverOptions: NonNullable<Parameters<typeof format>[1]>["descriptorResolverOptions"],
-  externalDataProvider: ExternalDataProvider,
-): Promise<Classified> {
-  const to = t.to ? t.to.toLowerCase() : null;
-  const selector = selectorOf(t.input);
-  const { bucket } = bucketFor(to, selector, CHAIN_ID, cov);
-  const row: LiveTxIn = { hash: t.hash, toAddress: to, selector, bucket };
-  if (bucket !== "covered_theory" || to === null) return { tx: row };
-
-  let model: DisplayModel;
-  try {
-    let value: bigint | undefined;
-    try {
-      value = t.value ? BigInt(t.value) : undefined;
-    } catch {
-      value = undefined;
-    }
-    model = await format(
-      { chainId: CHAIN_ID, to, data: t.input, value, from: t.from },
-      { descriptorResolverOptions: resolverOptions, externalDataProvider },
-    );
-  } catch (e) {
-    model = { warnings: [{ code: "UNEXPECTED_LIB_ERROR" as never, message: String(e) }] };
-  }
-  row.status = classifyModel(model);
-  row.warnings = (model.warnings ?? []).map((w) => ({ code: String(w.code), message: w.message }));
-  row.intent = model.interpolatedIntent ?? intentToString(model.intent);
-  row.display = model; // stored for pass, partial and failed alike (capped in @ccd/db)
-  return { tx: row };
-}
 
 function groupRows(txs: LiveTxIn[]): BlockGroupIn[] {
   const map = new Map<string, BlockGroupIn>();
@@ -180,14 +131,11 @@ async function main(): Promise<void> {
     })),
     cov.registryCommit,
   );
-  const resolverOptions = {
-    type: "custom" as const,
-    resolver: createFilesystemResolver({ index: loadRegistryIndex(REGISTRY_PATH), descriptorDirectory: REGISTRY_PATH }),
-  };
-
+  // The classifier (coverage lookup, descriptor resolver, external data) is the
+  // same module the API uses for on-demand lookups: packages/worker/src/live.
+  const classifier = createLiveClassifier({ db, rpc, chainId: CHAIN_ID, registryPath: REGISTRY_PATH, cov });
   const sigs = new SignatureCache(db);
-  const tokens = new TokenCache(db, rpc, CHAIN_ID);
-  const externalData = createExternalDataProvider({ db, rpc, chainId: CHAIN_ID, tokens });
+  const tokens = classifier.tokens;
   // Sourcify verification runs in the background on this same connection; the
   // block loop never waits on it.
   const contractSync = contractSyncEnabled() ? startContractSync(db, { chainId: CHAIN_ID, log }) : null;
@@ -245,7 +193,7 @@ async function main(): Promise<void> {
 
       const t0 = Date.now();
       const txs: LiveTxIn[] = [];
-      for (const t of block.transactions) txs.push((await classifyTx(t, cov, resolverOptions, externalData)).tx);
+      for (const t of block.transactions) txs.push(await classifier.classify(t));
       const groups = groupRows(txs);
       const timeIso = new Date(Number(block.timestamp) * 1000).toISOString();
       insertBlock(

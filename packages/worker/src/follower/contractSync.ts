@@ -34,12 +34,18 @@ const TIMEOUT_MS = 8000;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-type Check = { kind: "verified"; match: MatchKind; name: string | null; verifiedAtIso: string | null } | { kind: "unverified" } | { kind: "skip"; why: string };
+export type ContractCheck = { kind: "verified"; match: MatchKind; name: string | null; verifiedAtIso: string | null } | { kind: "unverified" } | { kind: "skip"; why: string };
+type Check = ContractCheck;
 
 interface SourcifyContract {
   match?: string;
   verifiedAt?: string;
   compilation?: { name?: string };
+}
+
+/** One Sourcify lookup (with SOURCIFY_TOKEN when set). Shared with the API's on-demand path. */
+export async function checkContract(chainId: number, address: string): Promise<ContractCheck> {
+  return check(chainId, address);
 }
 
 async function check(chainId: number, address: string): Promise<Check> {

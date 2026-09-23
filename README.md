@@ -143,9 +143,16 @@ Rules:
 - The hash is 32 bytes in hex with the `0x` prefix (66 characters). Case does
   not matter.
 - The block number is the decimal number, with or without thousands separators.
-- Only the live index answers: the follower keeps the last 7 days
-  (`RETENTION_DAYS`). An older transaction or block opens the modal with a
-  "not in the live index" note and a link to the explorer.
+- The live index answers first: the follower keeps the last 7 days
+  (`RETENTION_DAYS`). For anything else the API fetches the transaction or
+  the block from the RPC node and runs the same classifier the follower runs
+  (bucket, descriptor lookup, SDK rendering, Sourcify and 4byte lookups). The
+  modal then says "classified on demand". Such answers live in the API's
+  memory only; they never enter the window statistics or the rankings.
+- A block costs one RPC call plus the classifier on every transaction, about
+  one to two seconds. A transaction takes about half a second.
+- A pending transaction, a wrong hash, or a block above the head opens the
+  modal with a "not found" note.
 - Opening a modal pushes a browser history entry, so the back button closes it.
   A transaction opened from inside a block modal returns to that block.
 
