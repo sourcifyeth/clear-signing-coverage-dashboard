@@ -433,7 +433,7 @@ button {
   font-size: 15px;
   color: var(--text);
   margin-top: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 .toggles {
   display: flex;
@@ -1482,7 +1482,7 @@ footer {
   text-decoration: underline;
 }
 .heroWrap {
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 .heroWrap .disclaimer {
   max-width: 720px;
