@@ -24,4 +24,4 @@ echo "== restart services"
 systemctl restart ccd-api ccd-follower
 sleep 2
 systemctl --no-pager --lines=0 status ccd-follower ccd-api || true
-echo "== $(git -C "$APP" log -1 --format='%h %s')"
+echo "== $(as_ccd git -C "$APP" log -1 --format='%h %s')"

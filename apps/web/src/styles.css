@@ -40,6 +40,31 @@
   --faint: #9ca3af;
   --row-hover: #f9fafb;
   --row-active: var(--blue-100);
+  --field: #ffffff;            /* inputs, chips, small controls */
+  --field-soft: #f3f4f6;       /* the button half of a lookup box */
+  --ink-strong: #111827;
+  --ink-code: #4b5563;         /* decoded scalars, bytes boxes */
+  --topbar-bg: rgba(255, 255, 255, 0.85);
+  --bar-bg: rgba(255, 255, 255, 0.92);
+  --veil: rgba(243, 244, 246, 0.55);
+  --overlay: rgba(17, 24, 39, 0.45);
+  --tip-bg: #1f2937;
+  --tip-text: #ffffff;
+  --tip-muted: #d1d5db;
+  --banner-hover: #dbe5ff;
+  /* status banners (tx modal) and the red badge */
+  --ok-bg: #ecfdf3;
+  --ok-border: #a7f3c9;
+  --ok-fg: #15803d;
+  --warn-bg: #fffbeb;
+  --warn-border: #fde68a;
+  --warn-fg: #b45309;
+  --bad-bg: #fff1f2;
+  --bad-border: #fecdd3;
+  --bad-fg: #be123c;
+  --info-bg: #eef2fb;
+  --info-border: #c7d2ee;
+  --info-fg: #2b50aa;
 
   /* semantic */
   --accent: var(--blue);
@@ -55,6 +80,66 @@
 
   font-family: var(--sans);
   color-scheme: light;
+}
+
+/* Dark theme. index.html sets data-theme before the first paint from the
+   stored preference (light / dark / system); the switch in the top bar
+   changes it. Fills keep their hue; text steps get lighter, surfaces darker. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --blue-100: #1e2a47;
+  --blue-200: #3b5798;
+  --blue-300: #6e8ad6;
+  --blue-400: #6f8fe0;
+  --blue: #7d9bea;
+  --blue-600: #9db3f0;
+  --blue-700: #c3d0f5;
+  --coral-100: #5a2a2f;
+  --coral-300: #8a3a42;
+  --coral-600: #e8737b;
+  --coral-700: #ff9ea5;
+  --green-200: #1f4d33;
+  --green-400: #2e7d4f;
+  --green-700: #4ade80;
+  --green-bg: #10261a;
+  --amber: #fbbf24;
+  --amber-bg: #2a2110;
+  --amber-border: #6b4f0e;
+  --amber-text: #fcd34d;
+
+  --bg: #0f1420;
+  --card: #171d2b;
+  --border: #2a3345;
+  --border-strong: #3a4558;
+  --text: #e5e7eb;
+  --text-soft: #cbd2dc;
+  --muted: #9aa3b2;
+  --faint: #6b7483;
+  --row-hover: #1d2534;
+  --field: #111827;
+  --field-soft: #1f2937;
+  --ink-strong: #f3f4f6;
+  --ink-code: #b6bfcc;
+  --topbar-bg: rgba(15, 20, 32, 0.85);
+  --bar-bg: rgba(23, 29, 43, 0.92);
+  --veil: rgba(15, 20, 32, 0.55);
+  --overlay: rgba(0, 0, 0, 0.6);
+  --tip-bg: #0b0f19;
+  --tip-text: #f3f4f6;
+  --tip-muted: #9aa3b2;
+  --banner-hover: #24345e;
+  --ok-bg: #0f2a1c;
+  --ok-border: #1f5a3a;
+  --ok-fg: #4ade80;
+  --warn-bg: #2a2110;
+  --warn-border: #6b4f0e;
+  --warn-fg: #fbbf24;
+  --bad-bg: #2f151a;
+  --bad-border: #7a2b34;
+  --bad-fg: #ff9ea5;
+  --info-bg: #16213a;
+  --info-border: #2f4a86;
+  --info-fg: #a9bdee;
 }
 
 * {
@@ -104,7 +189,7 @@ button {
   position: sticky;
   top: 0;
   z-index: 20;
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--topbar-bg);
   backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--border);
   box-shadow: 0 2px 6px rgba(17, 24, 39, 0.06), 0 8px 24px rgba(17, 24, 39, 0.08);
@@ -156,6 +241,84 @@ button {
 .topnav a:hover {
   color: var(--blue);
   background-size: 100% 100%;
+}
+/* theme: one icon at the right end of the top bar; hover / click opens the menu */
+.themeMenu {
+  position: relative;
+  margin-left: 4px;
+}
+.themeBtn {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--field);
+  color: var(--text-soft);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.themeBtn:hover,
+.themeMenu.open .themeBtn {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+.themePop {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 170px;
+  padding: 4px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(17, 24, 39, 0.15);
+  z-index: 30;
+}
+/* a transparent bridge so the pointer can travel from the icon to the menu */
+.themePop::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -8px;
+  height: 8px;
+}
+.themeMenu:hover .themePop,
+.themeMenu:focus-within .themePop,
+.themeMenu.open .themePop {
+  display: block;
+}
+.themePop button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.themePop button:hover {
+  background: var(--row-hover);
+}
+.themePop button.on {
+  color: var(--blue);
+  font-weight: 600;
+}
+.themePop button .muted {
+  font-weight: 400;
 }
 
 /* ---------------------------------------------------------------------------
@@ -282,7 +445,7 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: #fff;
+  background: var(--field);
   border: 1px solid var(--border-strong);
   color: var(--text);
   padding: 6px 12px;
@@ -449,7 +612,7 @@ button {
 
 /* chips (window selector, tabs) */
 .chip {
-  background: #fff;
+  background: var(--field);
   border: 1px solid var(--border-strong);
   color: var(--text-soft);
   border-radius: 999px;
@@ -606,7 +769,7 @@ button {
   gap: 8px 16px;
   flex-wrap: nowrap;
   padding: 8px 14px;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--bar-bg);
   backdrop-filter: blur(8px);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -676,7 +839,7 @@ button {
   line-height: 1.45;
 }
 .disclaimer b {
-  color: #78350f;
+  color: var(--amber-text);
 }
 .liveBar {
   margin-bottom: 16px;
@@ -691,7 +854,7 @@ button {
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--card);
 }
 .tickRow {
   display: grid;
@@ -780,8 +943,8 @@ button {
   left: calc(100% + 8px);
   top: 50%;
   transform: translateY(-50%);
-  background: var(--text);
-  color: #fff;
+  background: var(--tip-bg);
+  color: var(--tip-text);
   border-radius: 6px;
   padding: 4px 8px;
   font-size: 11px;
@@ -809,7 +972,7 @@ button {
   position: fixed;
   inset: 0;
   z-index: 40;
-  background: rgba(243, 244, 246, 0.55);
+  background: var(--veil);
   backdrop-filter: blur(1.5px);
   display: flex;
   align-items: center;
@@ -829,7 +992,7 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #fff;
+  background: var(--card);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 16px;
@@ -924,7 +1087,7 @@ footer {
   animation: arrive 0.5s ease-out;
 }
 .newBanner:hover {
-  background: #dbe5ff;
+  background: var(--banner-hover);
   border-color: var(--blue-300);
 }
 .bannerBlocks {
@@ -935,7 +1098,7 @@ footer {
 /* ---------------------------------------------------------------------------
    last-blocks strip */
 .strip {
-  margin: 20px 0 28px;
+  margin: 0 0 8px;
 }
 .stripHead {
   display: flex;
@@ -961,7 +1124,7 @@ footer {
   padding: 6px 2px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--card);
 }
 .stripCol {
   flex: 1;
@@ -993,8 +1156,8 @@ footer {
   position: absolute;
   bottom: calc(100% + 8px);
   transform: translateX(-50%);
-  background: var(--text);
-  color: #fff;
+  background: var(--tip-bg);
+  color: var(--tip-text);
   border-radius: 6px;
   padding: 6px 10px;
   font-size: 12px;
@@ -1004,7 +1167,7 @@ footer {
   line-height: 1.5;
 }
 .stripTip .muted {
-  color: #d1d5db;
+  color: var(--tip-muted);
 }
 .stripAxis {
   display: flex;
@@ -1072,7 +1235,7 @@ footer {
   padding: 2px 6px;
   border: 1px solid var(--border-strong);
   border-radius: 4px;
-  background: #fff;
+  background: var(--field);
   color: var(--text);
 }
 /* a table waiting for its next page */
@@ -1103,7 +1266,7 @@ footer {
   font-size: 12px;
   white-space: nowrap;
   border: 1px solid var(--border);
-  background: #fff;
+  background: var(--field);
 }
 .badge.ok {
   color: var(--green-700);
@@ -1118,7 +1281,7 @@ footer {
 .badge.no {
   color: var(--coral-700);
   border-color: var(--coral-300);
-  background: #fff1f2;
+  background: var(--bad-bg);
 }
 .badge.native {
   color: var(--text-soft);
@@ -1141,7 +1304,7 @@ footer {
   overflow-wrap: anywhere;
   word-break: break-word;
   max-width: 100%;
-  background: #fff;
+  background: var(--field);
 }
 .selChip .mark {
   font-size: 11px;
@@ -1198,7 +1361,7 @@ footer {
 .modalOverlay {
   position: fixed;
   inset: 0;
-  background: rgba(17, 24, 39, 0.45);
+  background: var(--overlay);
   backdrop-filter: blur(2px);
   display: flex;
   align-items: flex-start;
@@ -1211,7 +1374,7 @@ footer {
   position: relative;
   width: 100%;
   max-width: 720px;
-  background: #fff;
+  background: var(--card);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 22px 24px;
@@ -1438,7 +1601,7 @@ footer {
 }
 .tickGroupLabel {
   padding: 8px 12px 4px;
-  background: #fff;
+  background: var(--card);
   border-bottom: 1px solid var(--border);
   font-weight: 600;
 }
@@ -1509,7 +1672,7 @@ footer {
   border: 1px solid var(--border-strong);
   border-radius: 999px;
   padding: 2px;
-  background: #fff;
+  background: var(--field);
   margin-bottom: 6px;
 }
 .seg {
@@ -1592,9 +1755,9 @@ footer {
   margin: 16px 0 12px;
   padding: 12px 16px;
   border-radius: 10px;
-  border: 1px solid #e5e7eb;
-  background: #f3f4f6;
-  color: #111827;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--ink-strong);
   font-size: 16px;
   font-weight: 600;
 }
@@ -1603,24 +1766,24 @@ footer {
   width: auto;
 }
 .statusBanner.ok {
-  background: #ecfdf3;
-  border-color: #a7f3c9;
-  color: #15803d;
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+  color: var(--ok-fg);
 }
 .statusBanner.warn {
-  background: #fffbeb;
-  border-color: #fde68a;
-  color: #b45309;
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+  color: var(--warn-fg);
 }
 .statusBanner.bad {
-  background: #fff1f2;
-  border-color: #fecdd3;
-  color: #be123c;
+  background: var(--bad-bg);
+  border-color: var(--bad-border);
+  color: var(--bad-fg);
 }
 .statusBanner.info {
-  background: #eef2fb;
-  border-color: #c7d2ee;
-  color: #2b50aa;
+  background: var(--info-bg);
+  border-color: var(--info-border);
+  color: var(--info-fg);
 }
 .statusBanner .statusGlyph {
   font-size: 24px;
@@ -1651,7 +1814,7 @@ footer {
   padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: #fff;
+  background: var(--card);
 }
 .csCardTitle {
   font-size: 12px;
@@ -1690,7 +1853,7 @@ footer {
 
 /* decoded argument values: a step lighter than body text */
 .argScalar {
-  color: #4b5563;
+  color: var(--ink-code);
 }
 
 /* decoded arguments: indented under the signature, with air between them */
@@ -1737,7 +1900,7 @@ footer {
   border-radius: 6px;
   background: var(--bg);
   font-size: 11px;
-  color: #4b5563;
+  color: var(--ink-code);
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -1769,8 +1932,8 @@ footer {
   margin: 12px 0 0;
   padding: 10px 14px;
   border-radius: 8px;
-  border: 1px solid #c7d2ee;
-  background: #eef2fb;
+  border: 1px solid var(--info-border);
+  background: var(--info-bg);
   color: var(--text-soft);
   font-size: 13px;
   line-height: 1.5;
@@ -1788,7 +1951,7 @@ footer {
   padding: 1px 8px;
   border: 1px solid var(--border-strong);
   border-radius: 999px;
-  background: #fff;
+  background: var(--field);
   color: var(--text-soft);
   font: inherit;
   font-size: 11px;
@@ -1831,8 +1994,8 @@ footer {
   top: calc(100% + 6px);
   width: max-content;
   max-width: 320px;
-  background: var(--text);
-  color: #fff;
+  background: var(--tip-bg);
+  color: var(--tip-text);
   border-radius: 6px;
   padding: 6px 9px;
   font-size: 11px;
@@ -1870,8 +2033,8 @@ footer {
   top: calc(100% + 4px);
   width: max-content;
   max-width: 340px;
-  background: var(--text);
-  color: #fff;
+  background: var(--tip-bg);
+  color: var(--tip-text);
   border-radius: 6px;
   padding: 6px 9px;
   font-size: 11px;
@@ -1921,8 +2084,8 @@ footer {
   transform: translateY(-50%);
   width: max-content;
   max-width: 260px;
-  background: var(--text);
-  color: #fff;
+  background: var(--tip-bg);
+  color: var(--tip-text);
   border-radius: 6px;
   padding: 4px 8px;
   font-size: 11px;
@@ -1941,7 +2104,7 @@ footer {
   padding: 1px 8px 1px 5px;
   border-radius: 999px;
   border: 1px solid var(--border-strong);
-  background: #fff;
+  background: var(--field);
   font-size: 11px;
   font-weight: 500;
   line-height: 1.6;
@@ -2011,7 +2174,7 @@ footer {
   background: var(--bg);
 }
 .copyBtn.done {
-  color: #16a34a;
+  color: var(--green-700);
 }
 .copyBtn[data-tip]:hover::after {
   content: attr(data-tip);
@@ -2019,8 +2182,8 @@ footer {
   left: 50%;
   top: calc(100% + 5px);
   transform: translateX(-50%);
-  background: var(--text);
-  color: #fff;
+  background: var(--tip-bg);
+  color: var(--tip-text);
   border-radius: 6px;
   padding: 3px 7px;
   font-size: 11px;
@@ -2077,7 +2240,7 @@ footer {
 
 /* block strip: the unverified part of the red sits at the top of the column */
 .stripRestUnv {
-  background: #c4535b;
+  background: var(--no-unverified, #c4535b);
   opacity: 0.6;
   width: 100%;
   flex: none;
@@ -2108,19 +2271,25 @@ footer {
   accent-color: var(--blue);
   margin: 0;
 }
-/* right side of the ticker caption: lookup box + the clear-signable filter */
-.tickerTools {
+/* section title inside the live card (Blocks, Transactions) with its lookup box */
+.secHead {
   display: flex;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 40px 0 14px;
+}
+.secHead h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
 }
 .lookup {
   display: inline-flex;
   align-items: stretch;
   border: 1px solid var(--border-strong);
   border-radius: 6px;
-  background: #fff;
+  background: var(--field);
   overflow: hidden;
 }
 .lookup:focus-within {
@@ -2138,8 +2307,11 @@ footer {
   font-size: 12px;
   color: var(--text);
   padding: 4px 8px;
-  width: 260px;
+  width: 220px;
   max-width: 60vw;
+}
+.lookup input[aria-label="Block number"] {
+  width: 130px;
 }
 .lookup input::placeholder {
   font-family: var(--sans);
@@ -2148,7 +2320,7 @@ footer {
 .lookup button {
   border: 0;
   border-left: 1px solid var(--border);
-  background: #f3f4f6;
+  background: var(--field-soft);
   color: var(--text-soft);
   font: inherit;
   font-size: 12px;
@@ -2198,8 +2370,8 @@ footer {
   top: calc(100% + 6px);
   width: max-content;
   max-width: 360px;
-  background: var(--text);
-  color: #fff;
+  background: var(--tip-bg);
+  color: var(--tip-text);
   border-radius: 6px;
   padding: 7px 10px;
   font-family: var(--sans);
@@ -2243,8 +2415,8 @@ footer {
   top: calc(100% + 8px);
   width: max-content;
   max-width: 360px;
-  background: var(--text);
-  color: #fff;
+  background: var(--tip-bg);
+  color: var(--tip-text);
   border-radius: 6px;
   padding: 7px 10px;
   font-size: 11px;

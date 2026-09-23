@@ -4,6 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ERC7730 Clear Signing Dashboard · Sourcify</title>
+    <script>
+      // Theme before the first paint (same rules as src/theme.ts): stored
+      // "light" / "dark", else the system setting.
+      (function () {
+        var p = null;
+        try { p = localStorage.getItem("ccd.theme"); } catch (e) {}
+        var dark = p === "dark" || (p !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      })();
+    </script>
     <link rel="icon" href="/favicon.ico" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

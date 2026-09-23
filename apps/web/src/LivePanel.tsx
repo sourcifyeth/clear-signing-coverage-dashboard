@@ -18,7 +18,7 @@ function joinList(parts: string[]): string {
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 import { BucketBar, Toggle } from "./BucketBar.tsx";
-import { parseLookup } from "./route.ts";
+import { Lookup } from "./Lookup.tsx";
 import { BlockStrip } from "./BlockStrip.tsx";
 import { RankingPanel } from "./RankingPanel.tsx";
 import { clip, CLIP_TEXT, fnName, iconFor, who } from "./txMeta.ts";
@@ -421,8 +421,16 @@ export function LivePanel({
                 )}
               </div>
 
+              <div className="secHead">
+                <h3>Blocks</h3>
+                <Lookup kind="block" onOpen={(r) => r.block !== null && onOpenBlock?.(r.block)} />
+              </div>
               <BlockStrip blocks={blocks} countEth={state.countEth} countToken={state.countToken} countUnverified={state.countUnverified} onOpen={onOpenBlock} />
 
+              <div className="secHead">
+                <h3>Transactions</h3>
+                <Lookup kind="tx" onOpen={(r) => r.tx && onInspect(r.tx)} />
+              </div>
               <div className="tickerHead muted small">
                 <span>
                   Newest transactions — click one for details
@@ -439,12 +447,9 @@ export function LivePanel({
                     </span>
                   )}
                 </span>
-                <div className="tickerTools">
-                  <Lookup onTx={onInspect} onBlock={(n) => onOpenBlock?.(n)} />
-                  <label className="tickFilter">
-                    <input type="checkbox" checked={signableOnly} onChange={(e) => setSignableOnly(e.target.checked)} /> Clear-signable only
-                  </label>
-                </div>
+                <label className="tickFilter">
+                  <input type="checkbox" checked={signableOnly} onChange={(e) => setSignableOnly(e.target.checked)} /> Clear-signable only
+                </label>
               </div>
               {pendingVisible > 0 && (
                 <button className="newBanner" onClick={showPending}>
@@ -578,45 +583,5 @@ export function TickerRow({
         {t.hash.slice(0, 8)}…
       </a>
     </div>
-  );
-}
-
-/**
- * Paste any transaction hash or block number (or an explorer URL that holds
- * one) and open the matching modal. The modal says when the item is outside
- * the 7-day live index.
- */
-function Lookup({ onTx, onBlock }: { onTx: (hash: string) => void; onBlock: (n: number) => void }) {
-  const [text, setText] = useState("");
-  const [bad, setBad] = useState(false);
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const r = parseLookup(text);
-    if (!r) {
-      setBad(true);
-      return;
-    }
-    setBad(false);
-    setText("");
-    if (r.tx) onTx(r.tx);
-    else if (r.block !== null) onBlock(r.block);
-  };
-  return (
-    <form className={`lookup ${bad ? "bad" : ""}`} onSubmit={submit} title="Opens the transaction or block in the details view">
-      <input
-        type="text"
-        value={text}
-        placeholder="Tx hash or block number"
-        spellCheck={false}
-        aria-label="Transaction hash or block number"
-        onChange={(e) => {
-          setText(e.target.value);
-          if (bad) setBad(false);
-        }}
-      />
-      <button type="submit" disabled={!text.trim()}>
-        Open
-      </button>
-    </form>
   );
 }

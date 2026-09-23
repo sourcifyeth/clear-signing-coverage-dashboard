@@ -133,9 +133,10 @@ https://erc7730.sourcify.dev/tx/0x11b4a41c2d479bcbb2dada95b6e73aff2b4c1de82d3656
 https://erc7730.sourcify.dev/block/25983122
 ```
 
-The same lookup is available in the page: the box above the transactions list
-takes a transaction hash or a block number. A full explorer URL that contains
-one also works; the app pulls the hash or the number out of it.
+The same lookup is available in the page: the box next to the "Blocks" title
+takes a block number, the box next to the "Transactions" title takes a
+transaction hash. A full explorer URL that contains one also works; the app
+pulls the hash or the number out of it.
 
 Rules:
 

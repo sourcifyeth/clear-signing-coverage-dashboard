@@ -18,6 +18,7 @@ import { BucketBar, Toggle, Stat, numOr } from "./BucketBar.tsx";
 import { fmtInt, fmtPct, short, signablePct } from "./buckets.ts";
 import { clip, contractUrl, REGISTRY_REPO, SDK_REPO } from "./txMeta.ts";
 import { parsePath, pathFor } from "./route.ts";
+import { ThemeSwitch } from "./ThemeSwitch.tsx";
 
 export function App() {
   const [report, setReport] = useState<Report | null | undefined>(undefined);
@@ -90,6 +91,7 @@ export function App() {
             <a href={SDK_REPO} target="_blank" rel="noreferrer">
               Sourcify SDK ↗
             </a>
+            <ThemeSwitch />
           </nav>
         </div>
       </div>
