@@ -108,18 +108,6 @@ export function RankingPanel({
       <div className="rankHead">
         <h3>
           Contracts by transaction count · last {win}
-          <span
-            className="infoTip"
-            tabIndex={0}
-            data-tip={
-              "Verified source code is a precondition for clear signing.\n\n" +
-              "A descriptor describes the contract's functions and their parameters, which needs the ABI from the source. " +
-              "A bytecode-only contract has no known functions to describe, so there is nothing to clear-sign.\n\n" +
-              "Use \"Unverified contracts\" in the control row above to leave those contracts out of this table and of every number on the page."
-            }
-          >
-            i
-          </span>
         </h3>
       </div>
       <p className="muted small">
