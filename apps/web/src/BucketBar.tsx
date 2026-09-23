@@ -41,6 +41,10 @@ export function BucketBar({
                 </span>
               </div>
             ))}
+          {/* the denominator of every share, at the right edge */}
+          <div className="legendItem legendTotal">
+            Total txs <span className="muted"> · {fmtInt(total)}</span>
+          </div>
         </div>
       )}
     </>
@@ -51,17 +55,19 @@ export function Toggle({
   on,
   onClick,
   label,
+  title,
   swatch,
   disabled,
 }: {
   on: boolean;
   onClick?: () => void;
   label: string;
+  title?: string;
   swatch: string;
   disabled?: boolean;
 }) {
   return (
-    <button className={`toggle ${on ? "on" : ""}`} onClick={onClick} disabled={disabled}>
+    <button className={`toggle ${on ? "on" : ""}`} onClick={onClick} disabled={disabled} title={title}>
       <span className="swatch" style={{ background: swatch, opacity: on ? 1 : 0.3 }} />
       {label}
     </button>

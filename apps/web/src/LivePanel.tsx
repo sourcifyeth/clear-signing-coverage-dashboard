@@ -18,6 +18,7 @@ function joinList(parts: string[]): string {
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 import { BucketBar, Toggle } from "./BucketBar.tsx";
+import { parseLookup } from "./route.ts";
 import { BlockStrip } from "./BlockStrip.tsx";
 import { RankingPanel } from "./RankingPanel.tsx";
 import { clip, CLIP_TEXT, fnName, iconFor, who } from "./txMeta.ts";
@@ -316,23 +317,21 @@ export function LivePanel({
       {/* Every number on the page follows these controls, so the row stays in view. */}
       <div className="ctrlBar">
         <div className="toggles" role="group" aria-label="What to count">
+          <span className="ctrlLabel">Include</span>
           {s ? (
             <>
-              {/* static chip: the descriptor-covered calls in this window, under the current toggles */}
-              <span className="toggle chip" title="Calls covered by an ERC-7730 descriptor in this window">
-                <span className="swatch" style={{ background: "#4ade80" }} />
-                Descriptor calls · {fmtInt(s.buckets.covered_theory)}
-              </span>
               <Toggle
                 on={state.countEth}
                 onClick={() => state.setCountEth(!state.countEth)}
-                label={`Include ETH transfers · ${fmtInt(s.native.ethTransfers)}`}
+                label={`ETH transfers · ${fmtInt(s.native.ethTransfers)}`}
+                title="Plain ETH transfers: a wallet shows these without a descriptor"
                 swatch="#a9bdee"
               />
               <Toggle
                 on={state.countToken}
                 onClick={() => state.setCountToken(!state.countToken)}
-                label={`Include token transfers / approvals · ${fmtInt(s.native.tokenTransfers)}`}
+                label={`Token transfers · ${fmtInt(s.native.tokenTransfers)}`}
+                title="Standard token transfers and approvals: a wallet shows these without a descriptor"
                 swatch="#7693da"
               />
               {/* only when the API reports the count (older APIs do not) */}
@@ -340,17 +339,28 @@ export function LivePanel({
                 <Toggle
                   on={state.countUnverified}
                   onClick={() => state.setCountUnverified(!state.countUnverified)}
-                  label={`Include unverified contracts · ${fmtInt(s.native.unverifiedCalls)}`}
+                  label={`Unverified contracts · ${fmtInt(s.native.unverifiedCalls)}`}
+                  title="Calls to contracts without verified source code: nothing to clear-sign"
                   swatch={COLOR.noUnverified}
                 />
               )}
+              <span
+                className="whyTip"
+                tabIndex={0}
+                data-tip={
+                  "Most wallets already handle ETH and token transfers.\n" +
+                  "A contract's source must be verified to be able to clear sign."
+                }
+              >
+                Why?
+              </span>
             </>
           ) : (
             <span className="toggle chip muted">Loading…</span>
           )}
         </div>
         <div className="winGroup" role="group" aria-label="Time window">
-          <span className="winLabel">Window</span>
+          <span className="ctrlLabel">Window</span>
           {WINDOWS.map((w) => (
             <button key={w} className={`chip ${win === w ? "on" : ""}`} onClick={() => setWin(w)} aria-pressed={win === w}>
               {w}
@@ -369,7 +379,7 @@ export function LivePanel({
               <a href={`https://etherscan.io/block/${latest.number}`} target="_blank" rel="noreferrer">
                 {fmtInt(latest.number)}
               </a>{" "}
-              with {fmtInt(latest.txCount)} txs · {ago(latest.timeIso, now)}
+              · {ago(latest.timeIso, now)}
             </div>
           )}
         </div>
@@ -396,22 +406,6 @@ export function LivePanel({
                       <span className="muted"> · {fmtInt(s.blocks)} blocks so far</span>
                     )}
                   </div>
-                  {excluding && (
-                    <div className="disclaimer small">
-                      Excluding{" "}
-                      <b>
-                        {joinList(
-                          [
-                            !state.countEth && `${fmtInt(s.excluded.ethTransfers)} ETH transfers`,
-                            !state.countToken && `${fmtInt(s.excluded.tokenTransfers)} token transfers / approvals`,
-                            !state.countUnverified && `${fmtInt(s.excluded.unverified ?? 0)} calls to unverified contracts`,
-                          ].filter((x): x is string => Boolean(x)),
-                        )}
-                      </b>
-                      .{!state.countToken && " Token transfers to tokens that have a descriptor (for example Tether) are excluded too."}
-                      {!state.countUnverified && " A descriptor needs the contract's source code, so a contract without verified source cannot be clear-signed."}
-                    </div>
-                  )}
                 </div>
 
               </div>
@@ -445,9 +439,12 @@ export function LivePanel({
                     </span>
                   )}
                 </span>
-                <label className="tickFilter">
-                  <input type="checkbox" checked={signableOnly} onChange={(e) => setSignableOnly(e.target.checked)} /> Clear-signable only
-                </label>
+                <div className="tickerTools">
+                  <Lookup onTx={onInspect} onBlock={(n) => onOpenBlock?.(n)} />
+                  <label className="tickFilter">
+                    <input type="checkbox" checked={signableOnly} onChange={(e) => setSignableOnly(e.target.checked)} /> Clear-signable only
+                  </label>
+                </div>
               </div>
               {pendingVisible > 0 && (
                 <button className="newBanner" onClick={showPending}>
@@ -581,5 +578,45 @@ export function TickerRow({
         {t.hash.slice(0, 8)}…
       </a>
     </div>
+  );
+}
+
+/**
+ * Paste any transaction hash or block number (or an explorer URL that holds
+ * one) and open the matching modal. The modal says when the item is outside
+ * the 7-day live index.
+ */
+function Lookup({ onTx, onBlock }: { onTx: (hash: string) => void; onBlock: (n: number) => void }) {
+  const [text, setText] = useState("");
+  const [bad, setBad] = useState(false);
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const r = parseLookup(text);
+    if (!r) {
+      setBad(true);
+      return;
+    }
+    setBad(false);
+    setText("");
+    if (r.tx) onTx(r.tx);
+    else if (r.block !== null) onBlock(r.block);
+  };
+  return (
+    <form className={`lookup ${bad ? "bad" : ""}`} onSubmit={submit} title="Opens the transaction or block in the details view">
+      <input
+        type="text"
+        value={text}
+        placeholder="Tx hash or block number"
+        spellCheck={false}
+        aria-label="Transaction hash or block number"
+        onChange={(e) => {
+          setText(e.target.value);
+          if (bad) setBad(false);
+        }}
+      />
+      <button type="submit" disabled={!text.trim()}>
+        Open
+      </button>
+    </form>
   );
 }

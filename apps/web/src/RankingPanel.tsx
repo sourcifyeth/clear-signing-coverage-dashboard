@@ -115,7 +115,7 @@ export function RankingPanel({
               "Verified source code is a precondition for clear signing.\n\n" +
               "A descriptor describes the contract's functions and their parameters, which needs the ABI from the source. " +
               "A bytecode-only contract has no known functions to describe, so there is nothing to clear-sign.\n\n" +
-              "Use \"Include unverified contracts\" in the control row above to leave those contracts out of this table and of every number on the page."
+              "Use \"Unverified contracts\" in the control row above to leave those contracts out of this table and of every number on the page."
             }
           >
             i

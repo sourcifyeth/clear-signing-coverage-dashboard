@@ -127,20 +127,6 @@ export function BlockStrip({
         <span>{fmtInt(blocks[0].number)}</span>
         <span>{fmtInt(last.number)}</span>
       </div>
-      <div className="legend small">
-        <div className="legendItem">
-          <span className="swatch" style={{ background: COLOR.ok }} /> clear-signable
-        </div>
-        <div className="legendItem">
-          <span className="swatch" style={{ background: "#ffccd0" }} /> not clear-signable
-        </div>
-        {countUnverified && (
-          <div className="legendItem">
-            <span className="swatch" style={{ background: COLOR.noUnverified, opacity: 0.6 }} /> of which unverified on Sourcify
-          </div>
-        )}
-        <div className="legendItem muted">bar height = share of the block's {what}</div>
-      </div>
     </div>
   );
 }

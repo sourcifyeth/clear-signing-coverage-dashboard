@@ -116,6 +116,42 @@ Stage B prints the headline coverage and the ranked backlog and writes the run
 to the database (`--no-db` skips that). A `--dry-run` flag reports the BigQuery
 bytes a run would scan without executing it. `GET /api/runs` lists the runs.
 
+## Open a transaction or a block by URL
+
+The web app understands two explorer-style paths. Both open the matching
+details modal on top of the dashboard, so a link can be shared or bookmarked:
+
+| Path | Opens |
+|---|---|
+| `/tx/<hash>` | the transaction modal: bucket, descriptor status, what a wallet shows, raw and decoded calldata |
+| `/block/<number>` | the block modal: per-bucket counts and every counted transaction |
+
+Examples on the deployed site:
+
+```
+https://erc7730.sourcify.dev/tx/0x11b4a41c2d479bcbb2dada95b6e73aff2b4c1de82d3656e4b85b9aa5e3876801
+https://erc7730.sourcify.dev/block/25983122
+```
+
+The same lookup is available in the page: the box above the transactions list
+takes a transaction hash or a block number. A full explorer URL that contains
+one also works; the app pulls the hash or the number out of it.
+
+Rules:
+
+- The hash is 32 bytes in hex with the `0x` prefix (66 characters). Case does
+  not matter.
+- The block number is the decimal number, with or without thousands separators.
+- Only the live index answers: the follower keeps the last 7 days
+  (`RETENTION_DAYS`). An older transaction or block opens the modal with a
+  "not in the live index" note and a link to the explorer.
+- Opening a modal pushes a browser history entry, so the back button closes it.
+  A transaction opened from inside a block modal returns to that block.
+
+The web app is a single page. nginx (`deploy/nginx/ccd.conf`) and the Vite dev
+server serve `index.html` for every path that is not `/api/…` or an asset, so a
+direct load or a reload of `/tx/…` and `/block/…` works.
+
 ## Live block follower
 
 `npm run follow` is a long-running process. Every few seconds it asks the RPC

@@ -3,10 +3,10 @@ import type { BucketKey, Buckets, LiveStatus } from "./types.ts";
 // Sourcify palette: green = covered / clear-signable, light coral = not
 // covered, cerulean blues for the wallet-native kinds (token calls, ETH sends).
 export const BUCKETS: { key: BucketKey; label: string; color: string }[] = [
-  { key: "covered_theory", label: "Covered by descriptor", color: "#4ade80" },
+  { key: "covered_theory", label: "Clear-signable", color: "#4ade80" },
   { key: "eth_transfer", label: "ETH transfer", color: "#a9bdee" },
   { key: "token_native", label: "Token transfer / approve", color: "#7693da" },
-  { key: "not_covered", label: "Not covered", color: "#ff858d" },
+  { key: "not_covered", label: "Non-clear-signable", color: "#ff858d" },
   { key: "contract_creation", label: "Contract creation", color: "#9ca3af" },
 ];
 
@@ -40,16 +40,16 @@ export function segments(b: Buckets, notCoveredUnverified?: number): Segment[] {
   const unv = Math.max(0, Math.min(notCoveredUnverified ?? 0, b.not_covered));
   const split = notCoveredUnverified !== undefined;
   return [
-    { key: "covered_theory", label: "Covered by descriptor", color: BUCKET_COLOR.covered_theory, value: b.covered_theory },
+    { key: "covered_theory", label: "Clear-signable", color: BUCKET_COLOR.covered_theory, value: b.covered_theory },
     { key: "eth_transfer", label: "ETH transfer", color: BUCKET_COLOR.eth_transfer, value: b.eth_transfer },
     { key: "token_native", label: "Token transfer / approve", color: BUCKET_COLOR.token_native, value: b.token_native },
     {
       key: "not_covered",
-      label: split ? "Not covered (verified)" : "Not covered",
+      label: split ? "Non-clear-signable (verified)" : "Non-clear-signable",
       color: COLOR.no,
       value: b.not_covered - unv,
     },
-    ...(split ? [{ key: "not_covered_unverified", label: "Not covered (unverified)", color: COLOR.noUnverified, value: unv }] : []),
+    ...(split ? [{ key: "not_covered_unverified", label: "Non-clear-signable (unverified)", color: COLOR.noUnverified, value: unv }] : []),
     { key: "contract_creation", label: "Contract creation", color: BUCKET_COLOR.contract_creation, value: b.contract_creation },
   ];
 }

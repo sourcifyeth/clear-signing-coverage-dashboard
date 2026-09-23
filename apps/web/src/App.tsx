@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   LineChart,
   Line,
@@ -9,7 +9,7 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from "recharts";
-import type { LatestBlock, LiveLatest, Report } from "./types.ts";
+import type { Report } from "./types.ts";
 import { labelFor } from "./labels.ts";
 import { LivePanel, type ToggleState } from "./LivePanel.tsx";
 import { TxModal } from "./TxModal.tsx";
@@ -17,11 +17,10 @@ import { BlockModal } from "./BlockModal.tsx";
 import { BucketBar, Toggle, Stat, numOr } from "./BucketBar.tsx";
 import { fmtInt, fmtPct, short, signablePct } from "./buckets.ts";
 import { clip, contractUrl, REGISTRY_REPO, SDK_REPO } from "./txMeta.ts";
+import { parsePath, pathFor } from "./route.ts";
 
 export function App() {
   const [report, setReport] = useState<Report | null | undefined>(undefined);
-  const [meta, setMeta] = useState<LiveLatest | null>(null);
-  const [latest, setLatest] = useState<LatestBlock | null>(null);
   // Wallet-native transfers are excluded by default: the question the dashboard
   // answers is about the calls that need a descriptor.
   const [countEth, setCountEth] = useState(false);
@@ -30,14 +29,43 @@ export function App() {
   // default: no descriptor can target a contract whose source is unknown, so
   // they are not part of the question the dashboard answers.
   const [countUnverified, setCountUnverified] = useState(false);
-  const [modalHash, setModalHash] = useState<string | null>(null);
-  const [modalBlock, setModalBlock] = useState<number | null>(null);
+  // The modals mirror the URL (/tx/<hash>, /block/<number>) so a link opens
+  // them directly and the back button closes them.
+  const [modalHash, setModalHash] = useState<string | null>(() => parsePath(location.pathname).tx);
+  const [modalBlock, setModalBlock] = useState<number | null>(() => parsePath(location.pathname).block);
 
   useEffect(() => {
-    fetch("/api/live/latest")
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setMeta)
-      .catch(() => setMeta(null));
+    const onPop = () => {
+      const r = parsePath(location.pathname);
+      setModalHash(r.tx);
+      setModalBlock(r.block);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  // Every open pushes a history entry marked as ours, so a close can go back to
+  // the entry before it (the dashboard, or the block the tx was opened from).
+  // A modal loaded directly by URL has no such entry: its close rewrites the URL.
+  const openTx = useCallback((hash: string) => {
+    history.pushState({ ccd: true }, "", pathFor({ tx: hash, block: null }));
+    setModalHash(hash);
+  }, []);
+  const openBlock = useCallback((n: number) => {
+    history.pushState({ ccd: true }, "", pathFor({ tx: null, block: n }));
+    setModalBlock(n);
+  }, []);
+  const closeModal = useCallback((fallback: { tx: string | null; block: number | null }) => {
+    if (history.state?.ccd) {
+      history.back();
+      return;
+    }
+    history.replaceState(null, "", pathFor(fallback));
+    setModalHash(fallback.tx);
+    setModalBlock(fallback.block);
+  }, []);
+
+  useEffect(() => {
     // The archived BigQuery snapshot is optional: the live section stands on its own.
     fetch("/api/report/latest")
       .then((r) => (r.ok ? r.json() : null))
@@ -69,42 +97,16 @@ export function App() {
     <div className="wrap">
       <header className="head">
         <div>
-          <h1>Clear-Signing Coverage</h1>
+          <h1>ERC7730 Clear Signing Dashboard</h1>
           <p className="sub">
             Share of Ethereum mainnet transactions that can be clear-signed with ERC-7730
             descriptors, and which contracts to add next.
           </p>
         </div>
-        <div className="meta">
-          <div>
-            <span className="muted">Registry</span>{" "}
-            {meta?.registryCommit ? (
-              <a className="mono" href={`${REGISTRY_REPO}/commit/${meta.registryCommit}`} target="_blank" rel="noreferrer">
-                {meta.registryCommit.slice(0, 8)}
-              </a>
-            ) : (
-              "—"
-            )}
-          </div>
-          <div>
-            <span className="muted">Indexed</span>{" "}
-            {meta ? `${fmtInt(meta.blocks)} blocks · 7-day retention` : "—"}
-          </div>
-          <div>
-            <span className="muted">Head</span>{" "}
-            {latest ? (
-              <a className="mono" href={`https://etherscan.io/block/${latest.number}`} target="_blank" rel="noreferrer">
-                {fmtInt(latest.number)}
-              </a>
-            ) : (
-              "—"
-            )}
-          </div>
-        </div>
       </header>
 
       {/* Live: block follower, rankings */}
-      <LivePanel state={state} onInspect={setModalHash} onOpenBlock={setModalBlock} onLatest={setLatest} />
+      <LivePanel state={state} onInspect={openTx} onOpenBlock={openBlock} />
 
       {/* Archived BigQuery snapshot, kept for reference */}
       {report && (
@@ -123,12 +125,12 @@ export function App() {
           countEth={countEth}
           countToken={countToken}
           countUnverified={countUnverified}
-          onClose={() => setModalBlock(null)}
-          onInspect={setModalHash}
+          onClose={() => closeModal({ tx: null, block: null })}
+          onInspect={openTx}
         />
       )}
       {/* a transaction opened from the block modal returns to it on close */}
-      {modalHash && <TxModal hash={modalHash} onClose={() => setModalHash(null)} />}
+      {modalHash && <TxModal hash={modalHash} onClose={() => closeModal({ tx: null, block: modalBlock })} />}
     </div>
     </>
   );
