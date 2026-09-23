@@ -466,6 +466,58 @@ async function fetchRawTx(hash: string): Promise<RawTxOut | null> {
 
 // The transaction as the node has it (from, to, value, calldata, ...), fetched
 // on demand for the transaction modal. The follower never stores calldata.
+// ---------------------------------------------------------------------------
+// Sourcify proxy for the web app. The modal needs the ABI, the proxy resolution
+// and the verification status of a contract. Fetching those from the browser
+// hits Sourcify's per-IP rate limit and cannot carry a token; here the API adds
+// SOURCIFY_TOKEN (optional) and caches every answer for a while. Only the
+// read-only contract lookup is exposed, and only for mainnet.
+
+const SOURCIFY_SERVER = "https://sourcify.dev/server";
+const SOURCIFY_HEADERS: Record<string, string> = process.env.SOURCIFY_TOKEN ? { "x-sourcify-token": process.env.SOURCIFY_TOKEN } : {};
+const SOURCIFY_TTL_MS = 10 * 60_000;
+const SOURCIFY_CACHE_MAX = 5000;
+const sourcifyCache = new Map<string, { at: number; status: number; body: string }>();
+
+app.get("/api/sourcify/contract/:chainId/:address", async (req, res) => {
+  const chainId = Number(req.params.chainId);
+  const address = String(req.params.address).toLowerCase();
+  const fields = typeof req.query.fields === "string" ? req.query.fields : "";
+  if (chainId !== 1) return res.status(400).json({ error: "mainnet only" });
+  if (!/^0x[0-9a-f]{40}$/.test(address)) return res.status(400).json({ error: "invalid address" });
+  if (!/^[a-zA-Z,]{0,80}$/.test(fields)) return res.status(400).json({ error: "invalid fields" });
+  const key = `${chainId}/${address}?${fields}`;
+  const hit = sourcifyCache.get(key);
+  const now = Date.now();
+  if (hit && now - hit.at < SOURCIFY_TTL_MS) {
+    res.set("Cache-Control", "public, max-age=300");
+    res.set("X-Cache", "hit");
+    return res.status(hit.status).type("application/json").send(hit.body);
+  }
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000);
+  try {
+    const url = `${SOURCIFY_SERVER}/v2/contract/${chainId}/${address}${fields ? `?fields=${fields}` : ""}`;
+    const up = await fetch(url, { signal: ctl.signal, headers: SOURCIFY_HEADERS });
+    const body = await up.text();
+    // 200 (verified) and 404 (not verified) are answers worth remembering;
+    // anything else is a transient upstream problem.
+    if (up.status === 200 || up.status === 404) {
+      if (sourcifyCache.size >= SOURCIFY_CACHE_MAX) sourcifyCache.delete(sourcifyCache.keys().next().value as string);
+      sourcifyCache.set(key, { at: now, status: up.status, body });
+      res.set("Cache-Control", "public, max-age=300");
+    } else {
+      res.set("Cache-Control", "no-store");
+    }
+    res.set("X-Cache", "miss");
+    res.status(up.status).type("application/json").send(body);
+  } catch (e) {
+    res.status(502).json({ error: `Sourcify request failed: ${(e as Error).name === "AbortError" ? "timeout" : (e as Error).message}` });
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
 app.get("/api/live/tx/:hash/raw", async (req, res) => {
   const hash = String(req.params.hash).trim();
   if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) return res.status(400).json({ error: "invalid tx hash" });

@@ -40,6 +40,8 @@ All commands run as root on the VM.
    cp /opt/ccd/app/.env.example /opt/ccd/env
    chmod 600 /opt/ccd/env
    nano /opt/ccd/env      # set RPC_URL or DRPC_API_KEY; leave DB_PATH and REGISTRY_PATH unset
+                          # SOURCIFY_TOKEN (optional): the x-sourcify-token value that lifts
+                          # sourcify.dev's rate limit for the follower's sync and the API's proxy
    ```
 
    The unit files set `DB_PATH`, `REGISTRY_PATH`, `HOST` and `PORT` themselves.

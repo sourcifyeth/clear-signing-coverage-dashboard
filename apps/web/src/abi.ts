@@ -16,7 +16,8 @@
 import type { Abi } from "viem";
 import { REGISTRY_REPO } from "./txMeta.ts";
 
-const SOURCIFY_SERVER = "https://sourcify.dev/server";
+/** the API's Sourcify proxy (adds the token, caches; see packages/api) */
+const SOURCIFY_CONTRACT = "/api/sourcify/contract";
 /** raw file URL for a repo-relative path on the registry's master branch */
 const REGISTRY_RAW = `${REGISTRY_REPO.replace("https://github.com/", "https://raw.githubusercontent.com/")}/master`;
 
@@ -40,7 +41,7 @@ const cache = new Map<string, Promise<AbiResult | null>>();
 
 async function fetchSourcifyContract(chainId: number, address: string, withProxy: boolean): Promise<SourcifyContract | null> {
   const fields = withProxy ? "abi,proxyResolution" : "abi";
-  const res = await fetch(`${SOURCIFY_SERVER}/v2/contract/${chainId}/${address}?fields=${fields}`);
+  const res = await fetch(`${SOURCIFY_CONTRACT}/${chainId}/${address}?fields=${fields}`);
   if (!res.ok) return null;
   return (await res.json()) as SourcifyContract;
 }
@@ -100,7 +101,7 @@ export function fetchVerification(chainId: number, address: string): Promise<Ver
   if (hit) return hit;
   const p = (async (): Promise<Verification> => {
     try {
-      const res = await fetch(`${SOURCIFY_SERVER}/v2/contract/${chainId}/${address}`);
+      const res = await fetch(`${SOURCIFY_CONTRACT}/${chainId}/${address}`);
       if (res.status === 404) return { status: "unverified" };
       if (!res.ok) return { status: "unknown" };
       const body = (await res.json()) as { match?: string };
@@ -135,7 +136,7 @@ export function fetchProxyInfo(chainId: number, address: string): Promise<ProxyI
   if (hit) return hit;
   const p = (async () => {
     try {
-      const res = await fetch(`${SOURCIFY_SERVER}/v2/contract/${chainId}/${address}?fields=proxyResolution`);
+      const res = await fetch(`${SOURCIFY_CONTRACT}/${chainId}/${address}?fields=proxyResolution`);
       if (!res.ok) return null;
       const body = (await res.json()) as { proxyResolution?: { isProxy?: boolean; proxyType?: string; implementations?: { address: string; name?: string }[] } };
       const pr = body.proxyResolution;

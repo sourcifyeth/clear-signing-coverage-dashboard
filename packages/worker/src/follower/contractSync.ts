@@ -26,6 +26,9 @@ import { contractsToCheck, contractsQueueSize, upsertContracts, contractCounts, 
 import type { openDb } from "@ccd/db";
 
 const SOURCIFY = "https://sourcify.dev/server";
+// SOURCIFY_TOKEN: the header that lifts the rate limit on /server/v2/contract/.
+// Optional; the sync runs at CONTRACTS_RATE either way.
+const HEADERS: Record<string, string> = process.env.SOURCIFY_TOKEN ? { "x-sourcify-token": process.env.SOURCIFY_TOKEN } : {};
 const ROUND_MS = 30_000;
 const TIMEOUT_MS = 8000;
 
@@ -43,7 +46,7 @@ async function check(chainId: number, address: string): Promise<Check> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(`${SOURCIFY}/v2/contract/${chainId}/${address}?fields=compilation`, { signal: ctl.signal });
+    const res = await fetch(`${SOURCIFY}/v2/contract/${chainId}/${address}?fields=compilation`, { signal: ctl.signal, headers: HEADERS });
     if (res.status === 404) return { kind: "unverified" };
     if (!res.ok) return { kind: "skip", why: `HTTP ${res.status}` };
     const body = (await res.json()) as SourcifyContract;
