@@ -4,6 +4,7 @@
  * clear-signed display model the Sourcify library produced.
  */
 
+import { CopyButton } from "./CopyButton.tsx";
 import { useEffect, useState, type ReactNode } from "react";
 import { isFieldGroup } from "@ethereum-sourcify/clear-signing";
 import type { DisplayModel, DisplayField } from "@ethereum-sourcify/clear-signing";
@@ -32,23 +33,6 @@ function Expandable({ text, max }: { text: string; max: number }) {
 }
 
 /** Copies `text` to the clipboard; the icon flips to a check for a moment. */
-function CopyButton({ text }: { text: string }) {
-  const [done, setDone] = useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setDone(true);
-      setTimeout(() => setDone(false), 1200);
-    } catch {
-      /* clipboard blocked (insecure context or permission); nothing to do */
-    }
-  };
-  return (
-    <button type="button" className={`copyBtn ${done ? "done" : ""}`} onClick={copy} data-tip={done ? "Copied" : "Copy hash"} aria-label="Copy transaction hash">
-      {done ? "✓" : "⧉"}
-    </button>
-  );
-}
 
 /**
  * Verification badge next to the contract: the Sourcify mark (linking to the

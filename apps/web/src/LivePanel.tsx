@@ -19,6 +19,7 @@ function joinList(parts: string[]): string {
 }
 import { BucketBar, Toggle } from "./BucketBar.tsx";
 import { Lookup } from "./Lookup.tsx";
+import { CopyButton } from "./CopyButton.tsx";
 import { BlockStrip } from "./BlockStrip.tsx";
 import { RankingPanel } from "./RankingPanel.tsx";
 import { clip, CLIP_TEXT, fnName, iconFor, who } from "./txMeta.ts";
@@ -507,11 +508,11 @@ export function TickerHeader({ withIndex = false }: { withIndex?: boolean }) {
     <div className={`tickRow tickHeader ${withIndex ? "withIdx" : ""}`} aria-hidden="true">
       {withIndex && <span>#</span>}
       <span />
+      <span>Tx</span>
       <span>Function</span>
       {!withIndex && <span>Block</span>}
       <span>Contract</span>
       <span>Clear-signed as</span>
-      <span className="tickHash">Tx</span>
     </div>
   );
 }
@@ -551,6 +552,14 @@ export function TickerRow({
     >
       {withIdx && <span className="tickIdx mono muted">#{index}</span>}
       <TickerIcon tx={t} />
+      {/* first 4 bytes; hover extends to the full hash, selectable, with a copy button */}
+      <span className="tickHash mono muted" onClick={(e) => e.stopPropagation()}>
+        <span className="tickHashShort">{t.hash.slice(0, 10)}</span>
+        <span className="tickHashFull" role="tooltip">
+          <span className="tickHashText">{t.hash}</span>
+          <CopyButton text={t.hash} />
+        </span>
+      </span>
       <span className="tickFn mono" title={t.functionSig ? `${t.functionSig}  ${t.selector}` : t.selector}>
         {t.bucket === "eth_transfer" || creation ? (
           <span className="muted">{name ?? ""}</span>
@@ -573,15 +582,6 @@ export function TickerRow({
       <span className={`tickIntent ${signed ? "" : "muted"}`} title={t.displayText ?? t.intent ?? undefined}>
         {clip(signed ? t.displayText ?? t.intent ?? "" : t.intent ?? (t.warnings[0] ? t.warnings[0].code : ""), CLIP_TEXT)}
       </span>
-      <a
-        className="tickHash mono muted"
-        href={`https://etherscan.io/tx/${t.hash}`}
-        target="_blank"
-        rel="noreferrer"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {t.hash.slice(0, 8)}…
-      </a>
     </div>
   );
 }

@@ -858,8 +858,8 @@ button {
 }
 .tickRow {
   display: grid;
-  /* icon | function | block | contract | clear-signed text | hash */
-  grid-template-columns: 26px minmax(180px, 250px) 78px 150px 1fr 78px;
+  /* icon | hash | function | block | contract | clear-signed text */
+  grid-template-columns: 26px 84px minmax(180px, 250px) 78px 150px 1fr;
   align-items: center;
   gap: 10px;
   padding: 7px 12px;
@@ -1045,9 +1045,40 @@ button {
   font-size: 12px;
 }
 .tickHash {
+  position: relative;
   font-size: 12px;
-  text-align: right;
-  text-decoration: none;
+  cursor: text;
+}
+.tickHashShort {
+  border-bottom: 1px dotted var(--border-strong);
+}
+/* the full hash pops over the row on hover; the text selects with one click */
+.tickHashFull {
+  display: none;
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--card);
+  border: 1px solid var(--blue-300);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(17, 24, 39, 0.18);
+  color: var(--text);
+  white-space: nowrap;
+  z-index: 5;
+}
+.tickHash:hover .tickHashFull,
+.tickHash:focus-within .tickHashFull {
+  display: inline-flex;
+}
+.tickHashText {
+  user-select: all;
+}
+.tickRow.dim .tickHash:hover {
+  opacity: 1;
 }
 @media (max-width: 760px) {
   .tickRow {
@@ -1591,8 +1622,8 @@ footer {
   background: var(--bg);
 }
 .tickRow.withIdx {
-  /* # | icon | function | contract | clear-signed text | hash */
-  grid-template-columns: 52px 26px minmax(180px, 250px) 150px 1fr 78px;
+  /* # | icon | hash | function | contract | clear-signed text */
+  grid-template-columns: 52px 26px 84px minmax(180px, 250px) 150px 1fr;
 }
 .tickIdx {
   font-size: 12px;
