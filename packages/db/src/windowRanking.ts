@@ -9,9 +9,9 @@
  * token exclusions do not change the sorted list of not-covered contracts;
  * they change the denominator (totalTx) and the baseline, which are cheap.
  * The unverified exclusion does change the list: contracts Sourcify knows to
- * be unverified drop out. So one stored row per window holds two variants of
- * the walk, `all` and `verified` (= without the unverified contracts), each
- * with:
+ * be unverified drop out. So does the "bots & infrastructure" exclusion
+ * (infra.ts). So one stored row per window holds four variants of the walk,
+ * one per combination of those two exclusions (see variantKey), each with:
  *
  *   - the top `TOP_CONTRACTS` not-covered contracts with their selectors,
  *   - the cumulative not-covered call count at sampled ranks (the curve, as
@@ -27,7 +27,8 @@
 import type { Db } from "./index.js";
 import type { Bucket } from "./write.js";
 import { pct, downsampleCurve, type RankedContract } from "./ranking.js";
-import type { ExcludeOptions } from "./selectors.js";
+import { STANDARD_TOKEN_SELECTORS, LIVE_CHAIN_ID, type ExcludeOptions } from "./selectors.js";
+import { INFRA_ADDRESSES, INFRA_ADDRESSES_SQL } from "./infra.js";
 import { WINDOW_KEYS, windowMeta, windowCounters, rebuildWindows, type WindowKey } from "./windows.js";
 
 /** How many top contracts the stored row carries; the summary's `limit` is capped here. */
@@ -36,7 +37,21 @@ export const TOP_CONTRACTS = 100;
 export const CURVE_POINTS = 500;
 const TOP_SELECTORS = 5;
 
-export type RankingVariant = "all" | "verified";
+export type RankingVariant = "all" | "verified" | "noinfra" | "verified_noinfra";
+
+/** The stored variant for a combination of the two list-changing exclusions. */
+export function variantKey(excludeUnverified: boolean | undefined, excludeInfra: boolean | undefined): RankingVariant {
+  if (excludeUnverified && excludeInfra) return "verified_noinfra";
+  if (excludeUnverified) return "verified";
+  if (excludeInfra) return "noinfra";
+  return "all";
+}
+const VARIANTS: { key: RankingVariant; unverified: boolean; infra: boolean }[] = [
+  { key: "all", unverified: false, infra: false },
+  { key: "verified", unverified: true, infra: false },
+  { key: "noinfra", unverified: false, infra: true },
+  { key: "verified_noinfra", unverified: true, infra: true },
+];
 
 export interface StoredRankingVariant {
   /** top not-covered contracts, most calls first; cumulativeTx = not-covered calls up to and including this rank */
@@ -50,7 +65,11 @@ export interface StoredRankingVariant {
 
 export interface StoredRanking {
   toBlock: number | null;
-  /** `all`: every not-covered contract; `verified`: without the ones Sourcify knows to be unverified */
+  /**
+   * `all`: every not-covered contract; `verified`: without the ones Sourcify
+   * knows to be unverified; `noinfra`: without the bots & infrastructure list;
+   * `verified_noinfra`: without both.
+   */
   variants: Record<RankingVariant, StoredRankingVariant>;
   notCoveredUnverified: number;
   verificationCoverage: { checked: number; total: number };
@@ -60,10 +79,55 @@ export interface StoredRanking {
 export interface WindowTotals {
   buckets: Record<Bucket, number>;
   practice: { passTx: number; partialTx: number; failedTx: number };
-  /** always measured, before exclusions */
-  native: { ethTransfers: number; tokenTransfers: number; unverifiedCalls: number };
+  /** always measured, before exclusions; infraCalls = every call to a listed bots & infrastructure contract */
+  native: { ethTransfers: number; tokenTransfers: number; unverifiedCalls: number; infraCalls: number };
   allTx: number;
   totalTx: number;
+}
+
+/** Per (bucket, status) counts of the calls to the bots & infrastructure list in a window, with the overlaps the other exclusions already remove. */
+interface InfraCounts {
+  tx: number;
+  /** of those, standard-token-selector calls (the token exclusion removes them already) */
+  std: number;
+  /** of those, not-covered calls to contracts Sourcify knows to be unverified (the unverified exclusion removes them already) */
+  unv: number;
+}
+
+/**
+ * The listed contracts' rows of a window, grouped by (bucket, status). The
+ * list is about 20 addresses and window_groups is indexed by (window,
+ * to_address), so this is a handful of index lookups; no running counter is
+ * kept for it.
+ */
+export function infraWindowCounts(db: Db, key: WindowKey): Map<string, InfraCounts> {
+  const out = new Map<string, InfraCounts>();
+  if (INFRA_ADDRESSES.size === 0) return out;
+  const unverified = new Set(
+    (
+      db
+        .prepare(`SELECT address FROM contracts WHERE chain_id = ${LIVE_CHAIN_ID} AND verified = 0 AND address IN (${INFRA_ADDRESSES_SQL})`)
+        .all() as { address: string }[]
+    ).map((r) => r.address),
+  );
+  const rows = db
+    .prepare(`SELECT to_address, selector, bucket, status, tx_count FROM window_groups WHERE window = ? AND to_address IN (${INFRA_ADDRESSES_SQL})`)
+    .all(key) as { to_address: string; selector: string; bucket: string; status: string; tx_count: number }[];
+  for (const r of rows) {
+    const k = `${r.bucket}|${r.status}`;
+    const c = out.get(k) ?? { tx: 0, std: 0, unv: 0 };
+    c.tx += r.tx_count;
+    if (STANDARD_TOKEN_SELECTORS.has(r.selector)) c.std += r.tx_count;
+    if (r.bucket === "not_covered" && unverified.has(r.to_address)) c.unv += r.tx_count;
+    out.set(k, c);
+  }
+  return out;
+}
+
+/** How many of a (bucket, status) counter's calls the infra exclusion removes on top of the other exclusions. */
+function infraRemoved(c: InfraCounts | undefined, filter: ExcludeOptions): number {
+  if (!c) return 0;
+  return c.tx - (filter.excludeToken ? c.std : 0) - (filter.excludeUnverified ? c.unv : 0);
 }
 
 const EMPTY_BUCKETS = (): Record<Bucket, number> => ({
@@ -78,14 +142,20 @@ const EMPTY_BUCKETS = (): Record<Bucket, number> => ({
  * Bucket, practice and native totals of a window under an exclusion, read from
  * `window_counters`: excludeEth zeroes the eth_transfer bucket, excludeToken
  * removes the standard-selector calls from every bucket, excludeUnverified
- * removes the not-covered calls to known-unverified contracts.
+ * removes the not-covered calls to known-unverified contracts, excludeInfra
+ * removes every call to a listed bots & infrastructure contract (read from
+ * window_groups per request, see infraWindowCounts) minus what the other two
+ * already removed, so no call leaves the denominator twice.
  */
 export function windowTotals(db: Db, key: WindowKey, filter: ExcludeOptions): WindowTotals {
   const counters = windowCounters(db, key);
   const meta = windowMeta(db, key);
+  const infra = infraWindowCounts(db, key);
   const buckets = EMPTY_BUCKETS();
   const practice = { passTx: 0, partialTx: 0, failedTx: 0 };
-  const native = { ethTransfers: 0, tokenTransfers: 0, unverifiedCalls: 0 };
+  const native = { ethTransfers: 0, tokenTransfers: 0, unverifiedCalls: 0, infraCalls: 0 };
+  let infraRemovedTotal = 0;
+  for (const c of infra.values()) native.infraCalls += c.tx;
   for (const c of counters) {
     if (c.bucket === "eth_transfer") native.ethTransfers += c.txCount;
     native.tokenTransfers += c.stdCount;
@@ -93,6 +163,11 @@ export function windowTotals(db: Db, key: WindowKey, filter: ExcludeOptions): Wi
     if (filter.excludeEth && c.bucket === "eth_transfer") continue;
     let n = filter.excludeToken ? c.txCount - c.stdCount : c.txCount;
     if (filter.excludeUnverified && c.bucket === "not_covered") n -= c.unvCount;
+    if (filter.excludeInfra) {
+      const r = infraRemoved(infra.get(`${c.bucket}|${c.status}`), filter);
+      n -= r;
+      infraRemovedTotal += r;
+    }
     if (c.bucket in buckets) buckets[c.bucket as Bucket] += n;
     if (c.bucket === "covered_theory") {
       if (c.status === "pass") practice.passTx += n;
@@ -105,7 +180,8 @@ export function windowTotals(db: Db, key: WindowKey, filter: ExcludeOptions): Wi
     allTx -
     (filter.excludeEth ? native.ethTransfers : 0) -
     (filter.excludeToken ? native.tokenTransfers : 0) -
-    (filter.excludeUnverified ? native.unverifiedCalls : 0);
+    (filter.excludeUnverified ? native.unverifiedCalls : 0) -
+    infraRemovedTotal;
   return { buckets, practice, native, allTx, totalTx };
 }
 
@@ -126,8 +202,8 @@ interface NcRow {
 }
 
 /** One variant's walk over a sorted list of not-covered contracts. */
-function walk(db: Db, key: WindowKey, rows: NcRow[], excludeUnverified: boolean): StoredRankingVariant {
-  const totals = COMBOS.map((c) => windowTotals(db, key, { excludeEth: c.eth, excludeToken: c.token, excludeUnverified }));
+function walk(db: Db, key: WindowKey, rows: NcRow[], excludeUnverified: boolean, excludeInfra: boolean): StoredRankingVariant {
+  const totals = COMBOS.map((c) => windowTotals(db, key, { excludeEth: c.eth, excludeToken: c.token, excludeUnverified, excludeInfra }));
   const reach = COMBOS.map((c, i) => {
     const t = totals[i];
     const b = pct(baselineOf(t), t.totalTx);
@@ -199,17 +275,15 @@ export function computeWindowRanking(db: Db, key: WindowKey): StoredRanking {
     if (r.verified !== null) checked++;
   }
 
+  const variants = {} as Record<RankingVariant, StoredRankingVariant>;
+  for (const v of VARIANTS) {
+    const kept = rows.filter((r) => (!v.unverified || r.verified !== 0) && (!v.infra || !INFRA_ADDRESSES.has(r.to_address)));
+    variants[v.key] = walk(db, key, kept, v.unverified, v.infra);
+  }
+
   return {
     toBlock: meta.toBlock,
-    variants: {
-      all: walk(db, key, rows, false),
-      verified: walk(
-        db,
-        key,
-        rows.filter((r) => r.verified !== 0),
-        true,
-      ),
-    },
+    variants,
     notCoveredUnverified: unverified,
     verificationCoverage: { checked, total: rows.length },
   };
@@ -256,7 +330,7 @@ export function readWindowRanking(db: Db, key: WindowKey): StoredRanking | null 
     | undefined;
   if (!r) return null;
   const parsed = JSON.parse(r.json) as Partial<StoredRanking>;
-  return parsed.variants?.all && parsed.variants.verified ? (parsed as StoredRanking) : null;
+  return VARIANTS.every((v) => parsed.variants?.[v.key]) ? (parsed as StoredRanking) : null;
 }
 
 /** Rebuild the window totals and then the stored rankings (follower start). */
@@ -333,7 +407,7 @@ export function windowRankingFor(
   curve: { n: number; pct: number }[];
   baselinePct: number;
 } {
-  const v = stored.variants[filter.excludeUnverified ? "verified" : "all"];
+  const v = stored.variants[variantKey(filter.excludeUnverified, filter.excludeInfra)];
   const limit = Math.max(1, Math.min(opts.limit ?? TOP_CONTRACTS, TOP_CONTRACTS));
   const maxPoints = Math.max(10, Math.min(opts.curvePoints ?? CURVE_POINTS, 2000));
   const baseline = baselineOf(totals);

@@ -58,11 +58,13 @@ function isSignable(t: LiveTx): boolean {
 }
 
 /** Is this row hidden by the toggles (and the clear-signable filter)? Mirrors the API's `exclude=` / `signable=` semantics. */
-function hiddenByToggles(t: LiveTx, countEth: boolean, countToken: boolean, signableOnly = false, countUnverified = true): boolean {
+function hiddenByToggles(t: LiveTx, countEth: boolean, countToken: boolean, signableOnly = false, countUnverified = true, countInfra = true): boolean {
   if (!countEth && t.bucket === "eth_transfer") return true;
   if (!countToken && STANDARD_TOKEN_SELECTORS.has(t.selector)) return true;
   // not covered, and Sourcify knows the contract has no verified source
   if (!countUnverified && t.bucket === "not_covered" && t.verified === false) return true;
+  // the contract is on the bots & infrastructure list
+  if (!countInfra && t.infra) return true;
   if (signableOnly && !isSignable(t)) return true;
   return false;
 }
@@ -88,9 +90,12 @@ export interface ToggleState {
   countToken: boolean;
   /** count not-covered calls to contracts Sourcify knows to be unverified */
   countUnverified: boolean;
+  /** count calls to the bots & infrastructure list (no end user signs a transaction to those) */
+  countInfra: boolean;
   setCountEth: (v: boolean) => void;
   setCountToken: (v: boolean) => void;
   setCountUnverified: (v: boolean) => void;
+  setCountInfra: (v: boolean) => void;
 }
 
 function ago(iso: string, now: number): string {
@@ -145,8 +150,8 @@ export function LivePanel({
   const winRef = useRef<Win>(win);
   const lastFetchRef = useRef(0);
   /** latest toggle state, readable from the SSE handler */
-  const togglesRef = useRef({ countEth: state.countEth, countToken: state.countToken, countUnverified: state.countUnverified, signableOnly });
-  togglesRef.current = { countEth: state.countEth, countToken: state.countToken, countUnverified: state.countUnverified, signableOnly };
+  const togglesRef = useRef({ countEth: state.countEth, countToken: state.countToken, countUnverified: state.countUnverified, countInfra: state.countInfra, signableOnly });
+  togglesRef.current = { countEth: state.countEth, countToken: state.countToken, countUnverified: state.countUnverified, countInfra: state.countInfra, signableOnly };
   /** hashes present when the list was last (re)loaded; rows not in here get the entry animation */
   const shownRef = useRef<Set<string> | null>(null);
 
@@ -156,7 +161,8 @@ export function LivePanel({
     return () => clearInterval(id);
   }, []);
 
-  const exclude = () => excludeParam(togglesRef.current.countEth, togglesRef.current.countToken, togglesRef.current.countUnverified);
+  const exclude = () =>
+    excludeParam(togglesRef.current.countEth, togglesRef.current.countToken, togglesRef.current.countUnverified, togglesRef.current.countInfra);
 
   async function fetchSummary(w: Win) {
     lastFetchRef.current = Date.now();
@@ -222,7 +228,7 @@ export function LivePanel({
     if (!loaded || !latest) return;
     withBusy(Promise.all([fetchSummary(winRef.current), fetchRecent()]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.countEth, state.countToken, state.countUnverified]);
+  }, [state.countEth, state.countToken, state.countUnverified, state.countInfra]);
 
   // Clear-signable filter: only the list changes, so only the list is refetched.
   useEffect(() => {
@@ -256,9 +262,10 @@ export function LivePanel({
         return { lo, hi };
       });
       if (e.blocks?.length) setBlocks((prev) => mergeBlocks(prev, e.blocks));
-      // The event carries the 24h summary for the default toggles (all three
+      // The event carries the 24h summary for the default toggles (all four
       // kinds excluded); any other combination is refetched instead.
-      const isDefault = !togglesRef.current.countEth && !togglesRef.current.countToken && !togglesRef.current.countUnverified;
+      const isDefault =
+        !togglesRef.current.countEth && !togglesRef.current.countToken && !togglesRef.current.countUnverified && !togglesRef.current.countInfra;
       if (winRef.current === "24h" && isDefault) setSummary(e.summary);
       else if (Date.now() - lastFetchRef.current > REFETCH_MIN_MS) void fetchSummary(winRef.current);
     });
@@ -274,7 +281,14 @@ export function LivePanel({
     pending
       .filter(
         (t) =>
-          !hiddenByToggles(t, togglesRef.current.countEth, togglesRef.current.countToken, togglesRef.current.signableOnly, togglesRef.current.countUnverified),
+          !hiddenByToggles(
+            t,
+            togglesRef.current.countEth,
+            togglesRef.current.countToken,
+            togglesRef.current.signableOnly,
+            togglesRef.current.countUnverified,
+            togglesRef.current.countInfra,
+          ),
       )
       .forEach((t, i) => order.set(t.hash, i));
     revealRef.current = order;
@@ -292,9 +306,11 @@ export function LivePanel({
 
   const s = summary;
   const total = s?.totalTx ?? 0;
-  const excluding = !state.countEth || !state.countToken || !state.countUnverified;
-  const visibleTxs = txs.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken, signableOnly, state.countUnverified)).slice(0, TICKER_MAX);
-  const pendingShown = pending.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken, signableOnly, state.countUnverified));
+  const excluding = !state.countEth || !state.countToken || !state.countUnverified || !state.countInfra;
+  const visibleTxs = txs
+    .filter((t) => !hiddenByToggles(t, state.countEth, state.countToken, signableOnly, state.countUnverified, state.countInfra))
+    .slice(0, TICKER_MAX);
+  const pendingShown = pending.filter((t) => !hiddenByToggles(t, state.countEth, state.countToken, signableOnly, state.countUnverified, state.countInfra));
   const pendingVisible = pendingShown.length;
   // "block N" or "blocks N to M": every block since the last render, not only
   // the ones whose rows survive the toggles or the buffer cap.
@@ -345,12 +361,22 @@ export function LivePanel({
                   swatch={COLOR.noUnverified}
                 />
               )}
+              {s.native.infraCalls !== undefined && (
+                <Toggle
+                  on={state.countInfra}
+                  onClick={() => state.setCountInfra(!state.countInfra)}
+                  label={`Bots & infrastructure · ${fmtInt(s.native.infraCalls)}`}
+                  title="Calls to contracts no end user signs a transaction to: ERC-4337 bundler entry points, relayers, MEV bots, exchange payout wallets, messaging executors. A descriptor would be shown to nobody. Hand-maintained list; hover a contract's pill for the reason."
+                  swatch={COLOR.infra}
+                />
+              )}
               <span
                 className="whyTip"
                 tabIndex={0}
                 data-tip={
                   "Most wallets already handle ETH and token transfers.\n" +
-                  "A contract's source must be verified to be able to clear sign."
+                  "A contract's source must be verified to be able to clear sign.\n" +
+                  "Bots & infrastructure: bundlers, relayers, MEV bots and operator wallets. No end user signs a transaction to them."
                 }
               >
                 Why?
@@ -426,7 +452,14 @@ export function LivePanel({
                 <h3>Blocks</h3>
                 <Lookup kind="block" onOpen={(r) => r.block !== null && onOpenBlock?.(r.block)} />
               </div>
-              <BlockStrip blocks={blocks} countEth={state.countEth} countToken={state.countToken} countUnverified={state.countUnverified} onOpen={onOpenBlock} />
+              <BlockStrip
+                blocks={blocks}
+                countEth={state.countEth}
+                countToken={state.countToken}
+                countUnverified={state.countUnverified}
+                countInfra={state.countInfra}
+                onOpen={onOpenBlock}
+              />
 
               <div className="secHead">
                 <h3>Transactions</h3>
@@ -440,9 +473,12 @@ export function LivePanel({
                       {" "}
                       ·{" "}
                       {joinList(
-                        [!state.countEth && "ETH transfers", !state.countToken && "token transfers", !state.countUnverified && "calls to unverified contracts"].filter(
-                          (x): x is string => Boolean(x),
-                        ),
+                        [
+                          !state.countEth && "ETH transfers",
+                          !state.countToken && "token transfers",
+                          !state.countUnverified && "calls to unverified contracts",
+                          !state.countInfra && "calls to bots & infrastructure",
+                        ].filter((x): x is string => Boolean(x)),
                       )}{" "}
                       hidden
                     </span>
@@ -483,7 +519,7 @@ export function LivePanel({
       {latest && (
         <RankingPanel
           win={win}
-          exclude={excludeParam(state.countEth, state.countToken, state.countUnverified)}
+          exclude={excludeParam(state.countEth, state.countToken, state.countUnverified, state.countInfra)}
           excluding={excluding}
           refreshKey={latest.number}
           onBusy={(d) => setBusy((b) => b + d)}

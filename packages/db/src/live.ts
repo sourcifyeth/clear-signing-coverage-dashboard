@@ -12,6 +12,7 @@ import type { Bucket, PracticalStatus } from "./write.js";
 import { pct, type RankedContract } from "./ranking.js";
 import { STANDARD_TOKEN_SELECTORS_SQL, excludeSql, type ExcludeOptions } from "./selectors.js";
 import { getContracts } from "./contracts.js";
+import { INFRA_ADDRESSES_SQL, infraTagOf, type InfraTag } from "./infra.js";
 import {
   addBlockToWindows,
   removeBlockFromWindows,
@@ -222,15 +223,16 @@ export interface LiveSummary {
   totalTx: number;
   /** every transaction in the window, before exclusions */
   allTx: number;
-  filter: { excludeEth: boolean; excludeToken: boolean; excludeUnverified: boolean };
+  filter: { excludeEth: boolean; excludeToken: boolean; excludeUnverified: boolean; excludeInfra: boolean };
   /**
    * Always measured, before exclusions: plain ETH sends, standard token calls
-   * (covered or not), and not-covered calls to contracts Sourcify knows to be
-   * unverified.
+   * (covered or not), not-covered calls to contracts Sourcify knows to be
+   * unverified, and every call to a contract on the bots & infrastructure
+   * list (infra.ts).
    */
-  native: { ethTransfers: number; tokenTransfers: number; unverifiedCalls: number };
-  /** the part of `native` the filter removed from totalTx */
-  excluded: { ethTransfers: number; tokenTransfers: number; unverified: number };
+  native: { ethTransfers: number; tokenTransfers: number; unverifiedCalls: number; infraCalls: number };
+  /** the part of `native` the filter removed from totalTx (the kinds overlap; totalTx counts each call once) */
+  excluded: { ethTransfers: number; tokenTransfers: number; unverified: number; infra: number };
   buckets: Record<Bucket, number>;
   /**
    * Part of buckets.not_covered whose target the Sourcify cache knows to be
@@ -271,7 +273,12 @@ export function liveSummary(
   const key = windowKeyForHours(windowHours);
   const meta = windowMeta(db, key);
   const { fromIso, toIso } = windowBounds(meta, latestBlock(db)?.timeIso ?? new Date().toISOString());
-  const filter = { excludeEth: !!opts.excludeEth, excludeToken: !!opts.excludeToken, excludeUnverified: !!opts.excludeUnverified };
+  const filter = {
+    excludeEth: !!opts.excludeEth,
+    excludeToken: !!opts.excludeToken,
+    excludeUnverified: !!opts.excludeUnverified,
+    excludeInfra: !!opts.excludeInfra,
+  };
 
   // Everything comes from the follower's per-window tables: the counters for
   // the totals, the stored ranking for the long-tail walk. No scan of
@@ -288,6 +295,7 @@ export function liveSummary(
     ethTransfers: filter.excludeEth ? native.ethTransfers : 0,
     tokenTransfers: filter.excludeToken ? native.tokenTransfers : 0,
     unverified: filter.excludeUnverified ? native.unverifiedCalls : 0,
+    infra: filter.excludeInfra ? native.infraCalls : 0,
   };
   const contractCalls = totalTx - buckets.eth_transfer - buckets.contract_creation;
 
@@ -345,6 +353,8 @@ export interface LiveTxOut {
   verified: boolean | null;
   /** Sourcify's contract name (compilation.name) when verified */
   sourcifyName: string | null;
+  /** set when the contract is on the bots & infrastructure list (infra.ts) */
+  infra: InfraTag | null;
 }
 
 export interface LiveTxDetailOut extends LiveTxOut {
@@ -474,6 +484,7 @@ function toLiveTx(r: RawLiveTx): LiveTxOut {
     descriptorPath: r.descriptor_path,
     verified: r.k_verified === null || r.k_verified === undefined ? null : r.k_verified === 1,
     sourcifyName: r.k_name ?? null,
+    infra: infraTagOf(r.to_address),
   };
 }
 
@@ -529,6 +540,12 @@ export interface BlockStat {
   /** part of notCovered whose target the Sourcify cache knows to be unverified */
   notCoveredUnverified: number;
   creation: number;
+  /** calls to contracts on the bots & infrastructure list, whatever the bucket */
+  infra: number;
+  /** of `infra`, standard token calls (already in tokenStd) */
+  infraStd: number;
+  /** of `infra`, not-covered calls to known-unverified contracts (already in notCoveredUnverified) */
+  infraUnverified: number;
 }
 
 interface RawBlockStat {
@@ -541,6 +558,9 @@ interface RawBlockStat {
   not_covered: number;
   not_covered_unverified: number;
   creation: number;
+  infra: number;
+  infra_std: number;
+  infra_unverified: number;
 }
 
 /** The per-block aggregate columns; `chainId` is embedded as a literal for the contracts join. */
@@ -552,7 +572,10 @@ function blockStatSelect(chainId: number): string {
               SUM(CASE WHEN g.bucket = 'covered_theory' AND g.selector NOT IN (${STANDARD_TOKEN_SELECTORS_SQL}) THEN g.tx_count ELSE 0 END) AS covered_other,
               SUM(CASE WHEN g.bucket = 'not_covered' THEN g.tx_count ELSE 0 END) AS not_covered,
               SUM(CASE WHEN g.bucket = 'not_covered' AND k.verified = 0 THEN g.tx_count ELSE 0 END) AS not_covered_unverified,
-              SUM(CASE WHEN g.bucket = 'contract_creation' THEN g.tx_count ELSE 0 END) AS creation
+              SUM(CASE WHEN g.bucket = 'contract_creation' THEN g.tx_count ELSE 0 END) AS creation,
+              SUM(CASE WHEN g.to_address IN (${INFRA_ADDRESSES_SQL}) THEN g.tx_count ELSE 0 END) AS infra,
+              SUM(CASE WHEN g.to_address IN (${INFRA_ADDRESSES_SQL}) AND g.selector IN (${STANDARD_TOKEN_SELECTORS_SQL}) THEN g.tx_count ELSE 0 END) AS infra_std,
+              SUM(CASE WHEN g.to_address IN (${INFRA_ADDRESSES_SQL}) AND g.bucket = 'not_covered' AND k.verified = 0 THEN g.tx_count ELSE 0 END) AS infra_unverified
        FROM block_groups g
        LEFT JOIN contracts k ON k.chain_id = ${Math.floor(Number(chainId))} AND k.address = g.to_address`;
 }
@@ -568,6 +591,9 @@ function toBlockStat(r: RawBlockStat): BlockStat {
     notCovered: r.not_covered,
     notCoveredUnverified: r.not_covered_unverified,
     creation: r.creation,
+    infra: r.infra ?? 0,
+    infraStd: r.infra_std ?? 0,
+    infraUnverified: r.infra_unverified ?? 0,
   };
 }
 
@@ -607,6 +633,9 @@ export function blockDetail(db: Db, number: number, chainId = 1): BlockDetail | 
     notCovered: 0,
     notCoveredUnverified: 0,
     creation: 0,
+    infra: 0,
+    infraStd: 0,
+    infraUnverified: 0,
   };
   const rows = db
     .prepare(`${LIVE_TX_SELECT} WHERE t.block_number = ? ORDER BY t.rowid ASC`)
@@ -666,6 +695,8 @@ export interface RankedContractRow {
   verified: boolean | null;
   /** Sourcify's contract name when verified */
   sourcifyName: string | null;
+  /** set when the contract is on the bots & infrastructure list (infra.ts) */
+  infra: InfraTag | null;
 }
 
 export interface LiveRanking {
@@ -704,9 +735,12 @@ export function liveRanking(
   // nothing here, since ETH sends are not contract calls. excludeUnverified
   // drops the contracts Sourcify knows to be unverified as whole rows (their
   // rare covered calls with them), so the page stays an ordered index read.
+  // excludeInfra drops the listed bots & infrastructure contracts the same way.
   const col = opts.excludeToken ? "tx_ex_token" : "tx_count";
   const covCol = opts.excludeToken ? "covered_ex_token" : "covered_tx";
-  const wc = `window = ? AND ${col} > 0${opts.excludeUnverified ? " AND COALESCE(verified, 1) <> 0" : ""}`;
+  const wc = `window = ? AND ${col} > 0${opts.excludeUnverified ? " AND COALESCE(verified, 1) <> 0" : ""}${
+    opts.excludeInfra ? ` AND to_address NOT IN (${INFRA_ADDRESSES_SQL})` : ""
+  }`;
   const agg = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(${col}), 0) AS tx FROM window_contracts WHERE ${wc}`).get(key) as { n: number; tx: number };
   const total = agg.n;
   const totalTx = agg.tx;
@@ -785,6 +819,7 @@ export function liveRanking(
       inRegistry: entityOf.has(r.to_address),
       verified: k ? k.verified : null,
       sourcifyName: k?.name ?? null,
+      infra: infraTagOf(r.to_address),
       txCount: r.n,
       sharePct: pct(r.n, totalTx),
       cumulativePct: pct(cum, totalTx),

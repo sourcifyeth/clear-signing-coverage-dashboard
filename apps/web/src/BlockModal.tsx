@@ -11,10 +11,11 @@ import { BucketBar } from "./BucketBar.tsx";
 import { splitBlock } from "./BlockStrip.tsx";
 import { TickerHeader, TickerRow } from "./LivePanel.tsx";
 
-function hidden(t: LiveTx, countEth: boolean, countToken: boolean, countUnverified: boolean): boolean {
+function hidden(t: LiveTx, countEth: boolean, countToken: boolean, countUnverified: boolean, countInfra: boolean): boolean {
   if (!countEth && t.bucket === "eth_transfer") return true;
   if (!countToken && STANDARD_TOKEN_SELECTORS.has(t.selector)) return true;
   if (!countUnverified && t.bucket === "not_covered" && t.verified === false) return true;
+  if (!countInfra && t.infra) return true;
   return false;
 }
 
@@ -42,6 +43,7 @@ export function BlockModal({
   countEth,
   countToken,
   countUnverified = true,
+  countInfra = true,
   onClose,
   onInspect,
 }: {
@@ -49,6 +51,7 @@ export function BlockModal({
   countEth: boolean;
   countToken: boolean;
   countUnverified?: boolean;
+  countInfra?: boolean;
   onClose: () => void;
   onInspect: (hash: string) => void;
 }) {
@@ -73,17 +76,17 @@ export function BlockModal({
     };
   }, [onClose]);
 
-  const excluding = !countEth || !countToken || !countUnverified;
+  const excluding = !countEth || !countToken || !countUnverified || !countInfra;
   // Rows carry their block position, then the toggles filter, then
   // clear-signable rows come first (each group in block order).
   const visible = useMemo<IndexedTx[]>(() => {
     if (!detail) return [];
     const all = detail.txs.map((tx, index) => ({ tx, index }));
-    const kept = showAll || !excluding ? all : all.filter((r) => !hidden(r.tx, countEth, countToken, countUnverified));
+    const kept = showAll || !excluding ? all : all.filter((r) => !hidden(r.tx, countEth, countToken, countUnverified, countInfra));
     const yes = kept.filter((r) => signable(r.tx, countEth, countToken));
     const no = kept.filter((r) => !signable(r.tx, countEth, countToken));
     return yes.concat(no);
-  }, [detail, showAll, excluding, countEth, countToken, countUnverified]);
+  }, [detail, showAll, excluding, countEth, countToken, countUnverified, countInfra]);
 
   return (
     <div className="modalOverlay" onClick={onClose} role="dialog" aria-modal="true">
@@ -104,6 +107,7 @@ export function BlockModal({
             countEth={countEth}
             countToken={countToken}
             countUnverified={countUnverified}
+            countInfra={countInfra}
             visible={visible}
             showAll={showAll}
             setShowAll={setShowAll}
@@ -120,6 +124,7 @@ function Body({
   countEth,
   countToken,
   countUnverified,
+  countInfra,
   visible,
   showAll,
   setShowAll,
@@ -129,16 +134,22 @@ function Body({
   countEth: boolean;
   countToken: boolean;
   countUnverified: boolean;
+  countInfra: boolean;
   visible: IndexedTx[];
   showAll: boolean;
   setShowAll: (v: boolean) => void;
   onInspect: (hash: string) => void;
 }) {
   const { block, stat, txs } = detail;
-  const split = splitBlock(stat, countEth, countToken, countUnverified);
-  const excluding = !countEth || !countToken || !countUnverified;
-  const hiddenCount = txs.length - txs.filter((t) => !hidden(t, countEth, countToken, countUnverified)).length;
+  const split = splitBlock(stat, countEth, countToken, countUnverified, countInfra);
+  const excluding = !countEth || !countToken || !countUnverified || !countInfra;
+  const hiddenCount = txs.length - txs.filter((t) => !hidden(t, countEth, countToken, countUnverified, countInfra)).length;
   const unv = stat.notCoveredUnverified ?? 0;
+  // Calls to the bots & infrastructure list that the toggle takes out on top
+  // of the other toggles. The per-block stat does not say which bucket they
+  // were in; today every listed contract is uncovered, so they come off
+  // "not covered" (clamped at zero).
+  const infraOut = split.infraExcluded;
   // The strip's breakdown as a Buckets object for the bar, under the toggles:
   // "token" is every standard token call (covered or not), "covered" the rest
   // of the covered ones; an excluded kind is left out, as on the main bar.
@@ -146,10 +157,10 @@ function Body({
     covered_theory: stat.coveredOther,
     eth_transfer: countEth ? stat.eth : 0,
     token_native: countToken ? stat.tokenStd : 0,
-    not_covered: stat.notCovered - (countUnverified ? 0 : unv),
+    not_covered: Math.max(0, stat.notCovered - (countUnverified ? 0 : unv) - infraOut),
     contract_creation: stat.creation,
   };
-  const barTotal = stat.total - (countEth ? 0 : stat.eth) - (countToken ? 0 : stat.tokenStd) - (countUnverified ? 0 : unv);
+  const barTotal = stat.total - (countEth ? 0 : stat.eth) - (countToken ? 0 : stat.tokenStd) - (countUnverified ? 0 : unv) - infraOut;
   const when = block.timeIso.replace("T", " ").replace(".000Z", " UTC");
 
   return (
@@ -188,7 +199,11 @@ function Body({
           <div className="statVal">
             {fmtInt(buckets.not_covered)} <Unit n={buckets.not_covered} />
           </div>
-          <div className="statLbl muted">not covered{!countUnverified && unv > 0 && ` · ${fmtInt(unv)} to unverified contracts excluded`}</div>
+          <div className="statLbl muted">
+            not covered
+            {!countUnverified && unv > 0 && ` · ${fmtInt(unv)} to unverified contracts excluded`}
+            {infraOut > 0 && ` · ${fmtInt(infraOut)} to bots & infrastructure excluded`}
+          </div>
         </div>
         <div className="blockStat">
           <div className="statVal">
@@ -198,7 +213,7 @@ function Body({
         </div>
       </div>
 
-      <BucketBar buckets={buckets} total={barTotal} unverified={countUnverified ? stat.notCoveredUnverified : undefined} />
+      <BucketBar buckets={buckets} total={barTotal} unverified={countUnverified ? split.unverified : undefined} />
 
       <div className="tickerHead muted small" style={{ marginTop: 18 }}>
         Transactions in this block — click one for details

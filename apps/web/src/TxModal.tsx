@@ -261,6 +261,15 @@ function TxBody({ row }: { row: LiveTxDetail }) {
             )}
           </span>
         </div>
+        {row.infra && (
+          <div className="metaRow">
+            <span className="muted">Bots & infra</span>
+            <span>
+              <b>{row.infra.name}</b> · {row.infra.reason}.{" "}
+              <span className="muted">No end user signs a transaction to this contract, so it is left out of the statistics by default.</span>
+            </span>
+          </div>
+        )}
         {row.bucket !== "eth_transfer" && row.bucket !== "contract_creation" && (
           <>
             <div className="metaRow">

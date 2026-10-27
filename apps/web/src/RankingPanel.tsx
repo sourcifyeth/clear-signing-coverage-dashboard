@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import type { LiveRanking, RankedContractRow, RankedSelector } from "./types.ts";
+import type { InfraTag, LiveRanking, RankedContractRow, RankedSelector } from "./types.ts";
 import { fmtInt, fmtPct, short } from "./buckets.ts";
 import { canonicalSig, clip, contractUrl, fnShort, knownName, REGISTRY_REPO } from "./txMeta.ts";
 
@@ -27,6 +27,16 @@ function VerifiedMini({ verified }: { verified: boolean | null | undefined }) {
       </span>
     );
   return null;
+}
+
+/** "Bots & infra" pill for a contract on the server's list; the reason is in the hover text. Exported for the transaction modal. */
+export function InfraMini({ infra }: { infra: InfraTag | null | undefined }) {
+  if (!infra) return null;
+  return (
+    <span className="verifyBadge infra mini" data-tip={`${infra.name}: ${infra.reason}`}>
+      🤖 Bots & infra
+    </span>
+  );
 }
 
 export function RankingPanel({
@@ -230,6 +240,7 @@ function ContractCell({ row }: { row: RankedContractRow }) {
           </span>
         )}{" "}
         <VerifiedMini verified={row.verified} />
+        <InfraMini infra={row.infra} />
       </span>
     </span>
   );

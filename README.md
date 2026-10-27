@@ -212,23 +212,62 @@ Live endpoints on the API:
 | `GET /api/live/summary?window=1h\|24h\|7d&limit=200&curve=500` | rolling-window buckets, headline %, library pass/partial/failed totals, and the 80% / 95% ranking for that window |
 | `GET /api/live/recent?limit=100&bucket=&since=` | newest transaction rows (hash + labels + intent, no contents) |
 | `GET /api/live/tx/:hash` | one stored row including the library's display model |
+| `GET /api/live/infra` | the bots & infrastructure list: address, name, kind, reason, source |
 | `GET /api/live/stream` | Server-Sent Events: a `block` event per new block with the block, its new transaction rows, and the 24h summary |
 
 The window in `summary` ends at the latest processed block, not at wall-clock
 now, so a stopped follower still reports its last complete window.
 
-`summary`, `recent` and `ranking` accept `exclude=eth,token,unverified`. `eth`
-drops plain ETH sends; `token` drops every call whose selector is a standard
-ERC-20/721 transfer or approval, whether or not the token has a descriptor (so
-Tether transfers go too); `unverified` drops the not-covered calls to contracts
-the Sourcify cache knows to be unverified (no source, so no descriptor can be
-written; contracts not yet checked stay in). Excluded transactions leave the
-denominator as well as the numerator: `totalTx` shrinks, the ranking baseline
-shrinks, and `excluded` / `allTx` say what was removed. The dashboard excludes
-ETH and token transfers by default and shows a disclaimer, because the question
-it answers is about the calls that need a descriptor. In the ranking, an
-unverified contract leaves as a whole row (its rare covered calls with it), so
-the page stays an ordered index read.
+`summary`, `recent` and `ranking` accept `exclude=eth,token,unverified,infra`.
+`eth` drops plain ETH sends; `token` drops every call whose selector is a
+standard ERC-20/721 transfer or approval, whether or not the token has a
+descriptor (so Tether transfers go too); `unverified` drops the not-covered
+calls to contracts the Sourcify cache knows to be unverified (no source, so no
+descriptor can be written; contracts not yet checked stay in); `infra` drops
+every call to a contract on the bots & infrastructure list (below), whatever
+its bucket. Excluded transactions leave the denominator as well as the
+numerator: `totalTx` shrinks, the ranking baseline shrinks, and `excluded` /
+`allTx` say what was removed. A call that two exclusions both cover (a listed
+contract that is also unverified) leaves once. The dashboard excludes all four
+kinds by default and shows a disclaimer, because the question it answers is
+about the calls that need a descriptor. In the ranking, an unverified or
+listed contract leaves as a whole row (its rare covered calls with it), so the
+page stays an ordered index read.
+
+### Bots & infrastructure list
+
+Some of the busiest mainnet contracts are never the `to` of a transaction an
+end user signs: ERC-4337 bundler entry points (bundlers sign `handleOps`),
+relayers and forwarders, MEV searchers and market makers with rotating keys,
+exchange payout wallets, cross-chain messaging executors, token sweepers.
+A descriptor for them would be shown to nobody, so they are not part of the
+question the dashboard answers, and by default they are left out like the
+unverified contracts.
+
+The list is maintained by hand in `packages/db/src/infra.ts`: one entry per
+address with a name, a kind, a one-line reason and the source of the verdict.
+The first list comes from the ERC-7730 target study of 2026-10-16, which read
+the 40 busiest mainnet contracts against their source, selector traffic and
+callers and found 19 that fail the "an end user signs a transaction to it"
+rule, plus one undetermined router kept on the list until someone decides.
+To add a contract, append an entry; no database change is needed. The API
+serves the list at `GET /api/live/infra`, tags every transaction and ranking
+row of a listed contract with `infra: { name, kind, reason }`, and the web
+app shows a "Bots & infra" pill with the reason on hover.
+
+The study also measured a cheap signal that finds such contracts: over the
+last 600 inbound transactions, count the distinct senders and the share that
+appear exactly once. Bundlers, bots and operator wallets repeat from the same
+keys (one-shot share under 40%); routers, bridges, tokens and marketplaces sit
+between 57% and 98%. With two gates (verified source with the proxy resolved,
+and at least 20 distinct senders) the rule matched all 40 verdicts. It is not
+computed by the dashboard yet. The follower sees every transaction's sender,
+so it could keep the last 600 senders per busy contract in memory only, write
+the three aggregates (signers, one-shot share, two-shot share) to a small
+table, and show them in the ranking with a "looks like bots or infrastructure,
+review" hint. The hint would flag candidates for the list; it would not
+exclude anything on its own, because the study's final verdicts also needed
+per-selector sender splits, sender nonces and calldata checks.
 
 Each row in `recent` carries `functionSig` and `displayText`. The signature
 comes from the registry descriptor for covered transactions, and from

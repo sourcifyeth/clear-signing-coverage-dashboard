@@ -14,6 +14,8 @@ import {
   upsertContracts,
   upsertSignatures,
   STANDARD_TOKEN_SELECTORS,
+  INFRA_ADDRESSES,
+  infraTagOf,
   type BlockDetail,
   type BlockStat,
   type Db,
@@ -150,6 +152,7 @@ export function createOnDemand(opts: { db: Db; rpc: Rpc; chainId: number; regist
       descriptorPath: hit?.descriptorPath ?? null,
       verified: ver.verified,
       sourcifyName: ver.name,
+      infra: infraTagOf(row.toAddress),
     };
   }
 
@@ -210,7 +213,20 @@ export function createOnDemand(opts: { db: Db; rpc: Rpc; chainId: number; regist
       // index too.
       const [names, known] = await Promise.all([signaturesFor(selectors), Promise.resolve(getContracts(db, chainId, addresses))]);
 
-      const stat: BlockStat = { number, timeIso, total: rows.length, eth: 0, tokenStd: 0, coveredOther: 0, notCovered: 0, notCoveredUnverified: 0, creation: 0 };
+      const stat: BlockStat = {
+        number,
+        timeIso,
+        total: rows.length,
+        eth: 0,
+        tokenStd: 0,
+        coveredOther: 0,
+        notCovered: 0,
+        notCoveredUnverified: 0,
+        creation: 0,
+        infra: 0,
+        infraStd: 0,
+        infraUnverified: 0,
+      };
       const txs: LiveTxOut[] = [];
       for (const r of rows) {
         const std = STANDARD_TOKEN_SELECTORS.has(r.selector);
@@ -222,6 +238,11 @@ export function createOnDemand(opts: { db: Db; rpc: Rpc; chainId: number; regist
         if (r.bucket === "not_covered") {
           stat.notCovered++;
           if (k && !k.verified) stat.notCoveredUnverified++;
+        }
+        if (r.toAddress && INFRA_ADDRESSES.has(r.toAddress)) {
+          stat.infra++;
+          if (std) stat.infraStd++;
+          if (r.bucket === "not_covered" && k && !k.verified) stat.infraUnverified++;
         }
         txs.push(toOut(r, { number, timeIso }, names, { verified: k ? k.verified : null, name: k?.name ?? null }));
       }

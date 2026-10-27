@@ -17,6 +17,8 @@ export const COLOR = {
   noText: "#ae373f",
   /** not covered AND unverified on Sourcify: a deeper coral (ΔE 16.5 from `no`, CVD-safe) */
   noUnverified: "#c4535b",
+  /** calls to the bots & infrastructure list (toggle swatch only; they are not a bar segment) */
+  infra: "#a78bfa",
   token: "#7693da",
   eth: "#a9bdee",
 } as const;
@@ -92,8 +94,17 @@ export const STANDARD_TOKEN_SELECTORS = new Set<string>([
   "0xa22cb465",
 ]);
 
-/** `?exclude=` value for the API from the three toggles ("" when nothing is excluded). */
-export function excludeParam(countEth: boolean, countToken: boolean, countUnverified = true): string {
-  const parts = [!countEth && "eth", !countToken && "token", !countUnverified && "unverified"].filter(Boolean);
+/** `?exclude=` value for the API from the four toggles ("" when nothing is excluded). */
+export function excludeParam(countEth: boolean, countToken: boolean, countUnverified = true, countInfra = true): string {
+  const parts = [!countEth && "eth", !countToken && "token", !countUnverified && "unverified", !countInfra && "infra"].filter(Boolean);
   return parts.length ? `&exclude=${parts.join(",")}` : "";
+}
+
+/**
+ * How many of a block's calls the bots & infrastructure toggle removes on top
+ * of the other toggles: the listed contracts' calls minus the ones the token
+ * and unverified toggles already took out, so no call is subtracted twice.
+ */
+export function infraRemovedOf(b: { infra?: number; infraStd?: number; infraUnverified?: number }, countToken: boolean, countUnverified: boolean): number {
+  return Math.max(0, (b.infra ?? 0) - (countToken ? 0 : b.infraStd ?? 0) - (countUnverified ? 0 : b.infraUnverified ?? 0));
 }

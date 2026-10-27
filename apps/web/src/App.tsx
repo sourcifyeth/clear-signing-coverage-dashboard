@@ -30,6 +30,10 @@ export function App() {
   // default: no descriptor can target a contract whose source is unknown, so
   // they are not part of the question the dashboard answers.
   const [countUnverified, setCountUnverified] = useState(false);
+  // Calls to the bots & infrastructure list (bundlers, relayers, MEV bots,
+  // operator wallets) are excluded by default: no end user signs a
+  // transaction to those contracts, so a descriptor would help nobody.
+  const [countInfra, setCountInfra] = useState(false);
   // The modals mirror the URL (/tx/<hash>, /block/<number>) so a link opens
   // them directly and the back button closes them.
   const [modalHash, setModalHash] = useState<string | null>(() => parsePath(location.pathname).tx);
@@ -74,7 +78,7 @@ export function App() {
       .catch(() => setReport(null));
   }, []);
 
-  const state: ToggleState = { countEth, countToken, countUnverified, setCountEth, setCountToken, setCountUnverified };
+  const state: ToggleState = { countEth, countToken, countUnverified, countInfra, setCountEth, setCountToken, setCountUnverified, setCountInfra };
 
   return (
     <>
@@ -127,6 +131,7 @@ export function App() {
           countEth={countEth}
           countToken={countToken}
           countUnverified={countUnverified}
+          countInfra={countInfra}
           onClose={() => closeModal({ tx: null, block: null })}
           onInspect={openTx}
         />

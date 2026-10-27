@@ -2242,6 +2242,22 @@ footer {
 /* --- Sourcify verification (contracts cache) --- */
 
 /* table-sized verification pill */
+/* bots & infrastructure pill (ranking table, tx modal) */
+.verifyBadge.infra {
+  color: #6d4fc2;
+  border-color: #c9b8f0;
+  background: #f1ecfb;
+  cursor: help;
+}
+:root[data-theme="dark"] .verifyBadge.infra {
+  color: #c4b5fd;
+  border-color: #5b4a99;
+  background: #2a2342;
+}
+.verifyBadge.infra[data-tip]:hover::after {
+  max-width: 360px;
+  white-space: normal;
+}
 .verifyBadge.mini {
   padding: 0 6px 0 4px;
   font-size: 10px;

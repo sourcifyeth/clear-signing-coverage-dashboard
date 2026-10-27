@@ -84,11 +84,11 @@ export interface LiveSummary {
   totalTx: number;
   /** every transaction in the window, before exclusions */
   allTx: number;
-  filter: { excludeEth: boolean; excludeToken: boolean; excludeUnverified?: boolean };
-  /** always measured, before exclusions (unverifiedCalls absent on an older API) */
-  native: { ethTransfers: number; tokenTransfers: number; unverifiedCalls?: number };
+  filter: { excludeEth: boolean; excludeToken: boolean; excludeUnverified?: boolean; excludeInfra?: boolean };
+  /** always measured, before exclusions (unverifiedCalls / infraCalls absent on an older API) */
+  native: { ethTransfers: number; tokenTransfers: number; unverifiedCalls?: number; infraCalls?: number };
   /** the part of `native` removed from totalTx by the filter */
-  excluded: { ethTransfers: number; tokenTransfers: number; unverified?: number };
+  excluded: { ethTransfers: number; tokenTransfers: number; unverified?: number; infra?: number };
   buckets: Buckets;
   /** part of buckets.not_covered whose target Sourcify knows to be unverified (absent on an older API) */
   notCoveredUnverified?: number;
@@ -107,6 +107,13 @@ export interface LiveSummary {
     contractsToReach95: number | null;
     curve: { n: number; pct: number }[];
   };
+}
+
+/** A contract on the server's "bots & infrastructure" list: no end user signs a transaction to it. */
+export interface InfraTag {
+  name: string;
+  kind: string;
+  reason: string;
 }
 
 export interface LiveTx {
@@ -130,6 +137,8 @@ export interface LiveTx {
   verified?: boolean | null;
   /** Sourcify's contract name when verified */
   sourcifyName?: string | null;
+  /** set when the contract is on the bots & infrastructure list (absent on an older API) */
+  infra?: InfraTag | null;
 }
 
 /** /api/live/tx/:hash — a stored row plus the library's DisplayModel. */
@@ -155,6 +164,12 @@ export interface BlockStat {
   /** part of notCovered to contracts Sourcify knows to be unverified (absent on an older API) */
   notCoveredUnverified?: number;
   creation: number;
+  /** calls to contracts on the bots & infrastructure list, whatever the bucket (absent on an older API) */
+  infra?: number;
+  /** of `infra`, standard token calls (already in tokenStd) */
+  infraStd?: number;
+  /** of `infra`, not-covered calls to known-unverified contracts (already in notCoveredUnverified) */
+  infraUnverified?: number;
 }
 
 export interface LiveBlockEvent {
@@ -204,6 +219,8 @@ export interface RankedContractRow {
   verified?: boolean | null;
   /** Sourcify's contract name when verified */
   sourcifyName?: string | null;
+  /** set when the contract is on the bots & infrastructure list (absent on an older API) */
+  infra?: InfraTag | null;
 }
 
 export interface LiveRanking {

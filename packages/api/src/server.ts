@@ -56,6 +56,8 @@ import {
   blockDetail,
   liveRanking,
   registryCommit,
+  INFRA_CONTRACTS,
+  INFRA_KIND_LABEL,
   type Bucket,
   type LiveSummary,
   type LiveRanking,
@@ -136,6 +138,14 @@ app.get("/api/live/latest", (_req, res) => {
   res.json({ latest: latestBlock(db), blocks: liveBlockCount(db), registryCommit: registryCommit(db) });
 });
 
+// The bots & infrastructure list (`exclude=infra`): the contracts no end user
+// signs a transaction to, with the reason for each. Static; maintained in
+// @ccd/db infra.ts.
+app.get("/api/live/infra", (_req, res) => {
+  res.set("Cache-Control", "public, max-age=600");
+  res.json({ kinds: INFRA_KIND_LABEL, contracts: INFRA_CONTRACTS });
+});
+
 // Per-block breakdown for the newest blocks (oldest first).
 app.get("/api/live/blocks", (req, res) => {
   res.set("Cache-Control", "no-cache");
@@ -187,13 +197,19 @@ const SUMMARY_CURVE = 500;
 /** an entry is refreshed on new blocks only while it was requested within this long */
 const SUMMARY_ACTIVE_MS = 10 * 60_000;
 const summaryCache = new Map<string, SummaryEntry>();
-/** The three exclusions a summary can be asked with (see excludeQuery). */
-type Filter = { excludeEth: boolean; excludeToken: boolean; excludeUnverified: boolean };
-// The web app's default toggles: ETH transfers, standard token calls and calls
-// to unverified contracts all excluded. The SSE block event carries this
-// combination's 24h summary, so a tab with the defaults never has to refetch.
-const DEFAULT_FILTER: Filter = { excludeEth: true, excludeToken: true, excludeUnverified: true };
-const summaryKey = (hours: number, f: Filter) => `${hours}|${f.excludeEth ? 1 : 0}|${f.excludeToken ? 1 : 0}|${f.excludeUnverified ? 1 : 0}`;
+/** The four exclusions a summary can be asked with (see excludeQuery). */
+type Filter = { excludeEth: boolean; excludeToken: boolean; excludeUnverified: boolean; excludeInfra: boolean };
+// The web app's default toggles: ETH transfers, standard token calls, calls
+// to unverified contracts and calls to the bots & infrastructure list all
+// excluded. The SSE block event carries this combination's 24h summary, so a
+// tab with the defaults never has to refetch.
+const DEFAULT_FILTER: Filter = { excludeEth: true, excludeToken: true, excludeUnverified: true, excludeInfra: true };
+const summaryKey = (hours: number, f: Filter) =>
+  `${hours}|${f.excludeEth ? 1 : 0}|${f.excludeToken ? 1 : 0}|${f.excludeUnverified ? 1 : 0}|${f.excludeInfra ? 1 : 0}`;
+const filterFromKey = (key: string): { hours: number; f: Filter } => {
+  const [hours, eth, token, unv, infra] = key.split("|");
+  return { hours: Number(hours), f: { excludeEth: eth === "1", excludeToken: token === "1", excludeUnverified: unv === "1", excludeInfra: infra === "1" } };
+};
 
 function computeSummary(hours: number, f: Filter, why: string): SummaryEntry {
   const t0 = Date.now();
@@ -228,8 +244,8 @@ function refreshSummariesForBlock(): void {
   const step = () => {
     const next = stale.shift();
     if (!next) return;
-    const [hours, eth, token, unv] = next[0].split("|");
-    computeSummary(Number(hours), { excludeEth: eth === "1", excludeToken: token === "1", excludeUnverified: unv === "1" }, "new block, active");
+    const { hours, f } = filterFromKey(next[0]);
+    computeSummary(hours, f, "new block, active");
     setImmediate(step);
   };
   setImmediate(step);
@@ -274,15 +290,22 @@ app.get("/api/live/ranking", (req, res) => {
 });
 
 /**
- * `?exclude=eth,token,unverified` leaves kinds of transactions out of a query
- * (numerator and denominator): `eth` = plain ETH sends, `token` = standard
- * ERC-20/721 transfer and approval calls, whether or not the token has a
- * descriptor, `unverified` = not-covered calls to contracts Sourcify knows to
- * be unverified (no source, so no descriptor can be written).
+ * `?exclude=eth,token,unverified,infra` leaves kinds of transactions out of a
+ * query (numerator and denominator): `eth` = plain ETH sends, `token` =
+ * standard ERC-20/721 transfer and approval calls, whether or not the token
+ * has a descriptor, `unverified` = not-covered calls to contracts Sourcify
+ * knows to be unverified (no source, so no descriptor can be written),
+ * `infra` = every call to a contract on the bots & infrastructure list (no
+ * end user signs a transaction to it; see @ccd/db infra.ts).
  */
 function excludeQuery(q: unknown): Filter {
   const parts = typeof q === "string" ? q.split(",").map((s) => s.trim()) : [];
-  return { excludeEth: parts.includes("eth"), excludeToken: parts.includes("token"), excludeUnverified: parts.includes("unverified") };
+  return {
+    excludeEth: parts.includes("eth"),
+    excludeToken: parts.includes("token"),
+    excludeUnverified: parts.includes("unverified"),
+    excludeInfra: parts.includes("infra"),
+  };
 }
 
 app.get("/api/live/summary", (req, res) => {

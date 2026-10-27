@@ -1,3 +1,5 @@
+import { INFRA_ADDRESSES_SQL } from "./infra.js";
+
 /**
  * The standard ERC-20 / ERC-721 transfer and approval selectors. Wallets show
  * these natively from token metadata, so the dashboard can exclude them from
@@ -34,6 +36,13 @@ export interface ExcludeOptions {
    * never affected.
    */
   excludeUnverified?: boolean;
+  /**
+   * drop every call to a contract on the "bots & infrastructure" list
+   * (infra.ts): bundlers, relayers, MEV bots, operator wallets, messaging
+   * executors. No end user signs a transaction to these, so a descriptor
+   * would help nobody. Whatever the bucket.
+   */
+  excludeInfra?: boolean;
 }
 
 /** Extra `AND ...` clauses for an `ExcludeOptions`, against columns `bucket`, `selector` and `to_address`. */
@@ -43,6 +52,7 @@ export function excludeSql(opts: ExcludeOptions | undefined, alias = ""): string
   if (opts?.excludeEth) sql += ` AND ${p}bucket != 'eth_transfer'`;
   if (opts?.excludeToken) sql += ` AND ${p}selector NOT IN (${STANDARD_TOKEN_SELECTORS_SQL})`;
   if (opts?.excludeUnverified) sql += ` AND NOT (${p}bucket = 'not_covered' AND ${unverifiedExistsSql(`${p}to_address`)})`;
+  if (opts?.excludeInfra) sql += ` AND ${p}to_address NOT IN (${INFRA_ADDRESSES_SQL})`;
   return sql;
 }
 

@@ -9,7 +9,7 @@
 
 import { useRef, useState } from "react";
 import type { BlockStat } from "./types.ts";
-import { COLOR, fmtInt, fmtPct } from "./buckets.ts";
+import { COLOR, fmtInt, fmtPct, infraRemovedOf } from "./buckets.ts";
 
 export interface BlockSplit {
   counted: number;
@@ -17,19 +17,25 @@ export interface BlockSplit {
   pct: number;
   /** not-covered calls to known-unverified contracts that are still counted (0 when excluded) */
   unverified: number;
+  /** calls to the bots & infrastructure list that left the denominator (0 when counted) */
+  infraExcluded: number;
 }
 
 /**
  * Split a block by the toggles: what is counted, and how much of it is
  * clear-signable. An excluded kind leaves the denominator: ETH sends, standard
- * token calls, and not-covered calls to contracts Sourcify knows to be
- * unverified. `unverified` = the part of the not-covered calls still counted.
+ * token calls, not-covered calls to contracts Sourcify knows to be
+ * unverified, and calls to the bots & infrastructure list. `unverified` = the
+ * part of the not-covered calls still counted.
  */
-export function splitBlock(b: BlockStat, countEth: boolean, countToken: boolean, countUnverified = true): BlockSplit {
+export function splitBlock(b: BlockStat, countEth: boolean, countToken: boolean, countUnverified = true, countInfra = true): BlockSplit {
   const unv = b.notCoveredUnverified ?? 0;
-  const counted = b.total - (countEth ? 0 : b.eth) - (countToken ? 0 : b.tokenStd) - (countUnverified ? 0 : unv);
+  const infraExcluded = countInfra ? 0 : infraRemovedOf(b, countToken, countUnverified);
+  const counted = b.total - (countEth ? 0 : b.eth) - (countToken ? 0 : b.tokenStd) - (countUnverified ? 0 : unv) - infraExcluded;
   const signable = b.coveredOther + (countToken ? b.tokenStd : 0) + (countEth ? b.eth : 0);
-  return { counted, signable, pct: counted > 0 ? (signable / counted) * 100 : 0, unverified: countUnverified ? unv : 0 };
+  // The listed contracts' unverified calls are in `unv`; when both are excluded they leave once (infraRemovedOf).
+  const unvShown = countUnverified ? (countInfra ? unv : Math.max(0, unv - (b.infraUnverified ?? 0))) : 0;
+  return { counted, signable, pct: counted > 0 ? (signable / counted) * 100 : 0, unverified: unvShown, infraExcluded };
 }
 
 export function BlockStrip({
@@ -37,12 +43,14 @@ export function BlockStrip({
   countEth,
   countToken,
   countUnverified = true,
+  countInfra = true,
   onOpen,
 }: {
   blocks: BlockStat[];
   countEth: boolean;
   countToken: boolean;
   countUnverified?: boolean;
+  countInfra?: boolean;
   /** click on a column */
   onOpen?: (blockNumber: number) => void;
 }) {
@@ -53,10 +61,10 @@ export function BlockStrip({
   if (blocks.length === 0) return null;
 
   const last = blocks[blocks.length - 1];
-  const lastSplit = splitBlock(last, countEth, countToken, countUnverified);
-  const what = countEth && countToken && countUnverified ? "transactions" : "counted calls";
+  const lastSplit = splitBlock(last, countEth, countToken, countUnverified, countInfra);
+  const what = countEth && countToken && countUnverified && countInfra ? "transactions" : "counted calls";
   const shown = hover !== null ? blocks[hover] : last;
-  const shownSplit = hover !== null ? splitBlock(shown, countEth, countToken, countUnverified) : lastSplit;
+  const shownSplit = hover !== null ? splitBlock(shown, countEth, countToken, countUnverified, countInfra) : lastSplit;
 
   return (
     <div className="strip">
@@ -80,7 +88,7 @@ export function BlockStrip({
 
       <div className="stripBars" onMouseLeave={() => setHover(null)}>
         {blocks.map((b, i) => {
-          const s = splitBlock(b, countEth, countToken, countUnverified);
+          const s = splitBlock(b, countEth, countToken, countUnverified, countInfra);
           const isLast = i === blocks.length - 1;
           const fresh = b.number > (initialMax.current ?? Infinity);
           return (
@@ -118,6 +126,7 @@ export function BlockStrip({
               {fmtInt(shown.coveredOther)} covered · {fmtInt(shown.notCovered)} not covered
               {shownSplit.unverified > 0 && <> ({fmtInt(shownSplit.unverified)} unverified)</>}
               {!countUnverified && (shown.notCoveredUnverified ?? 0) > 0 && <> · {fmtInt(shown.notCoveredUnverified ?? 0)} to unverified contracts excluded</>}
+              {shownSplit.infraExcluded > 0 && <> · {fmtInt(shownSplit.infraExcluded)} to bots & infrastructure excluded</>}
             </div>
           </div>
         )}
