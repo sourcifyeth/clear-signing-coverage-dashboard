@@ -280,10 +280,22 @@ display model: the intent followed by every field as `Label: value`.
 
 ## Stage A — build the coverage set
 
-Reads the registry's published `index.calldata.json` (address → descriptor),
-resolves each descriptor's `includes`, reads its `display.formats` function
+Walks the registry's descriptor files (`registry/**/calldata-*.json` and
+`eip712-*.json`, tests and attestations left out), resolves each descriptor's
+`includes`, reads its deployments and its `display.formats` function
 signatures, and computes each 4-byte selector. Output is one row per
 `(chainId, address, selector)`.
+
+The committed `index.calldata.json` / `index.eip712.json` are **not** read.
+The registry regenerates them on master through a "chore: update index files"
+pull request that has to be merged, so they lag the descriptors by days or
+weeks (on 2026-10-27 the committed index was six days old and missed 227
+addresses, among them the Uniswap V2 Router descriptor). The dashboard builds
+the same two indexes in memory from the files, with the registry's own
+generator ported to `packages/coverage/src/generateIndex.ts`, and hands the
+EIP-712 one to the Sourcify library as well. A collision or an unresolvable
+include is logged and the first descriptor in path order wins, where the
+registry's script would stop.
 
 The include-resolution and selector logic are ported faithfully from the registry
 repo (`.github/scripts/resolve-erc7730-includes.js` and
@@ -326,8 +338,9 @@ rows, stats }`, where each row is:
 registry's `ercs/` standard descriptors, so the aggregator can label the native
 token-transfer bucket.
 
-As of the current registry commit: **1250 mainnet `(address, selector)` rows**
-from 172 descriptors, 0 unparsable signatures.
+As of registry commit b70998c (2026-10-26): **3569 mainnet `(address, selector)`
+rows** from 388 descriptors, 0 unparsable signatures (the committed index of
+that day gave 3084).
 
 ## Deployment
 

@@ -142,8 +142,9 @@ async function main(): Promise<void> {
 
   log(`follower: rpc=${rpc.label} db=${dbPath}`);
   log(
-    `follower: coverage ${cov.rowCount} rows (registry ${cov.registryCommit?.slice(0, 8) ?? "?"}), retention ${RETENTION_DAYS}d, poll ${POLL_MS}ms, ${sigs.size} cached signatures, ${tokens.size} cached tokens`,
+    `follower: coverage ${cov.rowCount} rows (registry ${cov.registryCommit?.slice(0, 8) ?? "?"}, index generated from the descriptor files), retention ${RETENTION_DAYS}d, poll ${POLL_MS}ms, ${sigs.size} cached signatures, ${tokens.size} cached tokens`,
   );
+  for (const w of cov.indexWarnings) log(`follower: registry index: ${w}`);
 
   let stopping = false;
   process.on("SIGINT", () => {

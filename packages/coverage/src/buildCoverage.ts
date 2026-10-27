@@ -2,7 +2,9 @@
  * Stage A: build the clear-signing coverage set from a local checkout of the
  * ERC-7730 registry.
  *
- * Input:  <registry>/index.calldata.json  (eip155:<chainId>:<address> -> path)
+ * Input:  a registry checkout. The address -> descriptor index is generated
+ *         from the descriptor files (generateIndexes), not read from the
+ *         committed index.calldata.json, which lags the descriptors by days.
  * Output: one CoveredCalldata row per (chainId, address, selector).
  *
  * The index is address-level only. To know whether a *specific* transaction is
@@ -17,6 +19,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { resolveDescriptor, computeSelector } from "./erc7730.js";
+import { generateIndexes } from "./generateIndex.js";
 
 export interface CoveredCalldata {
   chainId: number;
@@ -39,10 +42,10 @@ export interface CoverageSet {
     rows: number;
     unparsableSignatures: number;
     chains: Record<string, number>; // chainId -> distinct (address,selector) count
+    /** descriptors skipped or collisions resolved while generating the index */
+    indexWarnings: string[];
   };
 }
-
-const CALLDATA_INDEX = "index.calldata.json";
 
 function parseCaipKey(key: string): { chainId: number; address: string } | null {
   // eip155:<chainId>:<address>
@@ -80,13 +83,11 @@ export function buildCoverageSet(opts: {
   chainIds?: number[];
 }): CoverageSet {
   const registryPath = path.resolve(opts.registryPath);
-  const indexAbs = path.join(registryPath, CALLDATA_INDEX);
-  if (!fs.existsSync(indexAbs)) {
-    throw new Error(
-      `${CALLDATA_INDEX} not found at ${indexAbs}. Point --registry at a checkout of clear-signing-erc7730-registry.`,
-    );
+  if (!fs.existsSync(path.join(registryPath, "registry"))) {
+    throw new Error(`no registry/ folder at ${registryPath}. Point --registry at a checkout of clear-signing-erc7730-registry.`);
   }
-  const index = JSON.parse(fs.readFileSync(indexAbs, "utf8")) as Record<string, string>;
+  const generated = generateIndexes(registryPath);
+  const index = generated.calldata;
 
   const chainFilter = opts.chainIds ? new Set(opts.chainIds) : null;
 
@@ -156,6 +157,7 @@ export function buildCoverageSet(opts: {
       rows: rows.length,
       unparsableSignatures: unparsable,
       chains,
+      indexWarnings: generated.warnings,
     },
   };
 }

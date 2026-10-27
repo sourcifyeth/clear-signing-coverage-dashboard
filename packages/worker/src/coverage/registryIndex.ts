@@ -1,28 +1,28 @@
 /**
  * Build the RegistryIndex the Sourcify library expects from a local registry
- * checkout. The registry already publishes the two files in exactly the shape
- * the library's RegistryIndex needs:
- *   index.calldata.json -> calldataIndex  (caip10 -> descriptor path)
- *   index.eip712.json   -> typedDataIndex (caip10 -> primaryType -> entries)
+ * checkout, in the shape of the registry's two index files:
+ *   calldataIndex  (caip10 -> descriptor path)
+ *   typedDataIndex (caip10 -> primaryType -> entries)
  *
- * Paths are stored full and relative to the repo root (e.g.
- * "registry/lido/calldata-wstETH.json"), so with descriptorDirectory set to the
- * repo root the library resolves each descriptor's `includes` chain correctly,
- * including `../../ercs/*.json` traversals.
+ * The committed index.calldata.json / index.eip712.json are not read: the
+ * registry refreshes them through a chore pull request and they lag the
+ * descriptors by days. Both indexes are generated from the descriptor files
+ * (see @ccd/coverage generateIndexes), the same way the registry's own
+ * generator does, so the library renders every descriptor at the checked-out
+ * commit.
+ *
+ * Paths are repo-relative (e.g. "registry/lido/calldata-wstETH.json"), so with
+ * descriptorDirectory set to the repo root the library resolves each
+ * descriptor's `includes` chain correctly, including `../../ercs/*.json`.
  */
 
-import fs from "node:fs";
-import path from "node:path";
 import type { RegistryIndex } from "@ethereum-sourcify/clear-signing";
+import { generateIndexes } from "@ccd/coverage";
 
 export function loadRegistryIndex(registryPath: string): RegistryIndex {
-  const calldataPath = path.join(registryPath, "index.calldata.json");
-  const eip712Path = path.join(registryPath, "index.eip712.json");
-
-  const calldataIndex = JSON.parse(fs.readFileSync(calldataPath, "utf8")) as RegistryIndex["calldataIndex"];
-  const typedDataIndex = fs.existsSync(eip712Path)
-    ? (JSON.parse(fs.readFileSync(eip712Path, "utf8")) as RegistryIndex["typedDataIndex"])
-    : {};
-
-  return { calldataIndex, typedDataIndex };
+  const g = generateIndexes(registryPath);
+  return {
+    calldataIndex: g.calldata as RegistryIndex["calldataIndex"],
+    typedDataIndex: g.eip712 as unknown as RegistryIndex["typedDataIndex"],
+  };
 }

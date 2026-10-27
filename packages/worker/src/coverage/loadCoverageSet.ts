@@ -15,6 +15,8 @@ export interface CoverageLookup {
   /** key `${chainId}|${address}` -> true if any selector covered */
   coveredAddresses: Set<string>;
   rowCount: number;
+  /** descriptors skipped or collisions resolved while the index was generated from the registry files */
+  indexWarnings: string[];
 }
 
 export function key3(chainId: number, address: string, selector: string): string {
@@ -45,5 +47,6 @@ export function loadCoverageLookup(opts: {
     bySelector,
     coveredAddresses,
     rowCount: set.rows.length,
+    indexWarnings: set.stats.indexWarnings,
   };
 }
