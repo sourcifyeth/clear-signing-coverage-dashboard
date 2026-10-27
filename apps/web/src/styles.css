@@ -767,7 +767,9 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 8px 16px;
-  flex-wrap: nowrap;
+  /* four toggles with six-digit counts do not fit one line on a laptop; the
+     toggles wrap and the window group moves to its own line when needed */
+  flex-wrap: wrap;
   padding: 8px 14px;
   background: var(--bar-bg);
   backdrop-filter: blur(8px);
@@ -779,7 +781,7 @@ button {
   margin-bottom: 0;
   flex: 1 1 auto;
   min-width: 0;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
 }
@@ -811,13 +813,6 @@ button {
 }
 .ctrlBar .winGroup .chip.on {
   box-shadow: 0 2px 8px rgba(43, 80, 170, 0.35);
-}
-/* narrow screens: two lines again, toggles first */
-@media (max-width: 860px) {
-  .ctrlBar,
-  .ctrlBar .toggles {
-    flex-wrap: wrap;
-  }
 }
 .liveEmpty {
   display: flex;
