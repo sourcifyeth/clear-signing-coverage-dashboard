@@ -70,6 +70,11 @@ All commands run as root on the VM.
 - The Sourcify verification sync runs inside the follower. Its lines start with
   `contracts:`. The queue is large at first and drains at about 14,000
   contracts per hour.
+- `journalctl -t ccd-registry-sync` shows one line every 10 minutes from the
+  registry sync. If it is empty, cron is not running (`systemctl is-active
+  cron`); minimal cloud images ship without it, and the follower then keeps
+  the descriptor set it loaded at install time. `curl
+  localhost:8787/api/live/latest` reports the registry commit in use.
 
 ## Day to day
 

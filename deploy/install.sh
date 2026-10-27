@@ -40,7 +40,8 @@ chmod 600 "$ENV_FILE"
 echo "== packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq nginx git curl ca-certificates >/dev/null
+# cron is not part of minimal cloud images; the registry sync below needs it.
+apt-get install -y -qq nginx git curl ca-certificates cron >/dev/null
 node_major() { node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0; }
 if [ "$(node_major)" -lt 20 ]; then
   # Ubuntu 24.04+ ships Node 18+/22 in its own archive; prefer that when it is
@@ -82,6 +83,7 @@ systemctl reload nginx
 
 echo "== registry sync cron"
 install -m 644 "$APP/deploy/cron/ccd-registry-sync" /etc/cron.d/ccd-registry-sync
+systemctl enable --now cron
 chmod +x "$APP/deploy/registry-sync.sh" "$APP/deploy/update.sh"
 
 sleep 3
