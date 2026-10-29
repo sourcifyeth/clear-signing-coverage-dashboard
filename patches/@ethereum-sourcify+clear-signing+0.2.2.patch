@@ -1,0 +1,60 @@
+diff --git a/node_modules/@ethereum-sourcify/clear-signing/dist/index.cjs b/node_modules/@ethereum-sourcify/clear-signing/dist/index.cjs
+index 7b5a411..e6679f6 100644
+--- a/node_modules/@ethereum-sourcify/clear-signing/dist/index.cjs
++++ b/node_modules/@ethereum-sourcify/clear-signing/dist/index.cjs
+@@ -2735,6 +2735,9 @@ function decodeArguments(inputs, calldata) {
+     arrayLengths: /* @__PURE__ */ new Map()
+   };
+   const data = calldata.slice(4);
++  // ccd patch: every array element takes at least one 32-byte word, so
++  // valid calldata holds at most data.length / 32 elements in total.
++  Object.defineProperty(decoded, "elementBudget", { value: Math.floor(data.length / 32), writable: true });
+   decodeComponents(inputs, data, 0, void 0, decoded);
+   return decoded;
+ }
+@@ -2775,6 +2778,15 @@ function decodeValue(input, data, offset, prefix, decoded) {
+       count = arr.size;
+       elementsStart = offset;
+     }
++    // ccd patch: the length comes from the calldata. Without these checks a
++    // crafted length (e.g. 1e48) makes the loop below run out of memory.
++    if (!Number.isSafeInteger(count) || count < 0 || count * 32 > data.length - elementsStart) {
++      throw new Error(`array length ${count} does not fit in the calldata`);
++    }
++    decoded.elementBudget -= count;
++    if (decoded.elementBudget < 0) {
++      throw new Error("calldata decodes to more array elements than it has words");
++    }
+     if (name) decoded.arrayLengths.set(name, count);
+     const elemInputs = [];
+     for (let i = 0; i < count; i++) {
+diff --git a/node_modules/@ethereum-sourcify/clear-signing/dist/index.js b/node_modules/@ethereum-sourcify/clear-signing/dist/index.js
+index aa2819f..f3a2450 100644
+--- a/node_modules/@ethereum-sourcify/clear-signing/dist/index.js
++++ b/node_modules/@ethereum-sourcify/clear-signing/dist/index.js
+@@ -2700,6 +2700,9 @@ function decodeArguments(inputs, calldata) {
+     arrayLengths: /* @__PURE__ */ new Map()
+   };
+   const data = calldata.slice(4);
++  // ccd patch: every array element takes at least one 32-byte word, so
++  // valid calldata holds at most data.length / 32 elements in total.
++  Object.defineProperty(decoded, "elementBudget", { value: Math.floor(data.length / 32), writable: true });
+   decodeComponents(inputs, data, 0, void 0, decoded);
+   return decoded;
+ }
+@@ -2740,6 +2743,15 @@ function decodeValue(input, data, offset, prefix, decoded) {
+       count = arr.size;
+       elementsStart = offset;
+     }
++    // ccd patch: the length comes from the calldata. Without these checks a
++    // crafted length (e.g. 1e48) makes the loop below run out of memory.
++    if (!Number.isSafeInteger(count) || count < 0 || count * 32 > data.length - elementsStart) {
++      throw new Error(`array length ${count} does not fit in the calldata`);
++    }
++    decoded.elementBudget -= count;
++    if (decoded.elementBudget < 0) {
++      throw new Error("calldata decodes to more array elements than it has words");
++    }
+     if (name) decoded.arrayLengths.set(name, count);
+     const elemInputs = [];
+     for (let i = 0; i < count; i++) {

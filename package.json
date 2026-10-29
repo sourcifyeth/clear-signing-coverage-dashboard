@@ -8,6 +8,7 @@
     "apps/*"
   ],
   "scripts": {
+    "postinstall": "patch-package",
     "stage-a": "tsx packages/coverage/src/cli.ts",
     "stage-b": "tsx packages/worker/src/cli.ts",
     "stage-c": "tsx packages/worker/src/cliC.ts",
@@ -25,6 +26,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
+    "patch-package": "^8.0.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   },
