@@ -21,7 +21,7 @@ import { TokenCache, createExternalDataProvider } from "../follower/externalData
 
 export { loadCoverageLookup, key3, type CoverageLookup };
 export { lookupSignatures } from "../follower/signatures.js";
-export { checkContract, type ContractCheck } from "../follower/contractSync.js";
+export { checkContract, contractInFromCheck, type ContractCheck } from "../follower/contractSync.js";
 
 type ResolverOptions = NonNullable<Parameters<typeof format>[1]>["descriptorResolverOptions"];
 

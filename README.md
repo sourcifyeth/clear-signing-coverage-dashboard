@@ -70,6 +70,8 @@ SQLite in WAL mode is enough; no database server is needed. Tables:
 | `window_counters`, `window_contracts` | follower | derived from the window groups with every block: per-window counts per (bucket, status) with the standard-token-selector share, and per-window totals per contract (calls, calls without standard selectors, covered calls, not-covered calls, Sourcify verified flag) with indexes on the counts. The summary reads the counters; the ranking pages read the contracts through the indexes, so no request groups the long tail |
 | `window_ranking` | follower | the "what to build next" result per window (top 100 not-covered contracts with selectors, the cumulative curve, the 80% / 95% ranks for each exclusion combination, the verification split), computed once per block from `window_contracts` and returned by the summary as is |
 | `tx_index`  | follower   | one row per transaction: hash, block, to, selector, bucket, and for covered ones the library's status, warning codes, one-line intent and the full display model as JSON (capped at 8 KB). 7-day retention via `pruneLive()` |
+| `contract_senders` | follower | the last 600 senders of each of the 2000 busiest contracts of the 24h window, for the caller statistics (see "Caller statistics" below). Trimmed to 600 per contract and to the stored blocks every 100 blocks; rewound with the blocks on a reorg |
+| `contracts` | follower (Sourcify sync) | Sourcify verification per called address, with the proxy resolved: `verified` is 1 only when the contract and every implementation behind it are verified; `proxy_impl` / `impl_verified` keep the implementations |
 
 SQLite settings, applied by `openDb()` on every connection: WAL journal, a
 256 MB page cache, a 1 GB memory map, and in-memory temp storage. The
@@ -79,7 +81,9 @@ tables from disk once the file passed a few gigabytes. The follower also runs
 the write-ahead log does not grow past a few hundred megabytes while the API
 holds read transactions.
 
-We never store transaction contents (calldata, value, sender). The browser
+We never store transaction contents (calldata, value). The only sender data
+kept is the last 600 senders of each busy contract, for the caller
+statistics. The browser
 fetches a transaction over RPC and decodes it on demand; for transactions the
 follower already processed, its stored result is shown next to the fresh run.
 
@@ -203,6 +207,7 @@ Environment:
 | `POLL_MS` | `4000` | head poll interval |
 | `START_BLOCK` | current head | first block to process (else: continue after the stored head) |
 | `RETENTION_DAYS` | `7` | prune live rows older than this |
+| `SENDER_TRACK` | `2000` | how many of the 24h window's busiest contracts get their senders recorded for the caller statistics; `0` turns it off |
 
 Live endpoints on the API:
 
@@ -223,7 +228,9 @@ now, so a stopped follower still reports its last complete window.
 standard ERC-20/721 transfer or approval, whether or not the token has a
 descriptor (so Tether transfers go too); `unverified` drops the not-covered
 calls to contracts the Sourcify cache knows to be unverified (no source, so no
-descriptor can be written; contracts not yet checked stay in); `infra` drops
+descriptor can be written; contracts not yet checked stay in; a verified proxy
+counts as unverified when the code behind it is not verified, because it gives
+no ABI either); `infra` drops
 every call to a contract on the bots & infrastructure list (below), whatever
 its bucket. Excluded transactions leave the denominator as well as the
 numerator: `totalTx` shrinks, the ranking baseline shrinks, and `excluded` /
@@ -233,6 +240,11 @@ kinds by default and shows a disclaimer, because the question it answers is
 about the calls that need a descriptor. In the ranking, an unverified or
 listed contract leaves as a whole row (its rare covered calls with it), so the
 page stays an ordered index read.
+
+In the ranking, a contract's `coveredTx` counts the calls that were covered
+when the follower processed them, but each function's `covered` flag follows
+the current registry. So after a descriptor lands, its functions show ✅ at
+once, and the contract's covered share climbs as the window moves on.
 
 ### Bots & infrastructure list
 
@@ -255,19 +267,45 @@ serves the list at `GET /api/live/infra`, tags every transaction and ranking
 row of a listed contract with `infra: { name, kind, reason }`, and the web
 app shows a "Bots & infra" pill with the reason on hover.
 
+### Caller statistics
+
 The study also measured a cheap signal that finds such contracts: over the
 last 600 inbound transactions, count the distinct senders and the share that
 appear exactly once. Bundlers, bots and operator wallets repeat from the same
 keys (one-shot share under 40%); routers, bridges, tokens and marketplaces sit
 between 57% and 98%. With two gates (verified source with the proxy resolved,
-and at least 20 distinct senders) the rule matched all 40 verdicts. It is not
-computed by the dashboard yet. The follower sees every transaction's sender,
-so it could keep the last 600 senders per busy contract in memory only, write
-the three aggregates (signers, one-shot share, two-shot share) to a small
-table, and show them in the ranking with a "looks like bots or infrastructure,
-review" hint. The hint would flag candidates for the list; it would not
-exclude anything on its own, because the study's final verdicts also needed
-per-selector sender splits, sender nonces and calldata checks.
+and at least 20 distinct senders) the rule matched all 40 verdicts.
+
+The dashboard computes it, as a hint for a person:
+
+1. The follower takes the 2000 busiest contracts of the 24h window
+   (`SENDER_TRACK`) and records the sender of every transaction to them in
+   `contract_senders`. Every 100 blocks it trims each contract to its newest
+   600 senders and picks the busiest contracts again.
+2. For each row it serves, the ranking endpoint groups those senders and
+   returns `callers`: `sample` (calls, at most 600), `signers` (distinct
+   senders), `oneShotPct` and `twoShotPct` (senders seen once, at most twice),
+   `topSenderPct` (the busiest sender's share of the calls), a `verdict` and a
+   one-line `reason`.
+3. The verdict applies the study's rule (`packages/db/src/senders.ts`):
+
+   | Verdict | When |
+   |---|---|
+   | `collecting` | fewer than 50 calls recorded |
+   | `bots` | fewer than 20 distinct senders, or under 35% of them call once |
+   | `review` | 35% to 50% call once (the study's review band), or 50% and more on a contract whose source is not verified (the study's wash-trading farm looked like a crowd) |
+   | `users` | 50% and more call once, source verified or not checked yet |
+
+4. The web table shows it in the "Callers" column; the hover text has all
+   the numbers and the rule.
+
+Nothing is excluded because of the verdict: the hand-kept list stays the only
+`infra` exclusion. A `bots` verdict on a contract that is not on the list is a
+candidate to read and, if it holds, to add. The study's final verdicts also
+needed per-selector sender splits, sender nonces and calldata checks, which
+this does not do. On a new database the column fills from the first prune
+cycle (100 blocks) on, and a contract's sample reaches 600 calls as its
+traffic arrives.
 
 Each row in `recent` carries `functionSig` and `displayText`. The signature
 comes from the registry descriptor for covered transactions, and from

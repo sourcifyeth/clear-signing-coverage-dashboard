@@ -221,6 +221,21 @@ export interface RankedContractRow {
   sourcifyName?: string | null;
   /** set when the contract is on the bots & infrastructure list (absent on an older API) */
   infra?: InfraTag | null;
+  /** a proxy's implementations and whether all are verified (absent on an older API) */
+  proxy?: { implementations: string[]; implementationVerified: boolean } | null;
+  /** sender statistics of the last calls (absent on an older API, null when none are recorded) */
+  callers?: CallerStats | null;
+}
+
+/** The ERC-7730 target study's caller signal, a hint only (see @ccd/db senders.ts). */
+export interface CallerStats {
+  sample: number;
+  signers: number;
+  oneShotPct: number;
+  twoShotPct: number;
+  topSenderPct: number;
+  verdict: "users" | "review" | "bots" | "collecting";
+  reason: string;
 }
 
 export interface LiveRanking {

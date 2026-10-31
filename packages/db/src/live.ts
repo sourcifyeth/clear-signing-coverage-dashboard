@@ -13,6 +13,7 @@ import { pct, type RankedContract } from "./ranking.js";
 import { STANDARD_TOKEN_SELECTORS_SQL, excludeSql, type ExcludeOptions } from "./selectors.js";
 import { getContracts } from "./contracts.js";
 import { INFRA_ADDRESSES_SQL, infraTagOf, type InfraTag } from "./infra.js";
+import { callerStats, deleteSendersFrom, type CallerStats } from "./senders.js";
 import {
   addBlockToWindows,
   removeBlockFromWindows,
@@ -156,6 +157,7 @@ export function deleteBlocksFrom(db: Db, number: number): number {
     removeBlocksFromWindows(db, number);
     db.prepare("DELETE FROM tx_index WHERE block_number >= ?").run(number);
     db.prepare("DELETE FROM block_groups WHERE block_number >= ?").run(number);
+    deleteSendersFrom(db, number);
     const res = db.prepare("DELETE FROM blocks WHERE number >= ?").run(number);
     return Number(res.changes);
   })();
@@ -676,6 +678,11 @@ export interface RankedSelector {
   /** registry signature, else the 4byte name, else null */
   functionSig: string | null;
   txCount: number;
+  /**
+   * The current registry has a descriptor for this (address, function). Not
+   * the stored buckets: calls from before a descriptor landed stay "not
+   * covered" in the window totals, but the function is covered from now on.
+   */
   covered: boolean;
 }
 
@@ -697,6 +704,10 @@ export interface RankedContractRow {
   sourcifyName: string | null;
   /** set when the contract is on the bots & infrastructure list (infra.ts) */
   infra: InfraTag | null;
+  /** set for a proxy: its implementations and whether all are verified (null = not a proxy or not resolved yet) */
+  proxy: { implementations: string[]; implementationVerified: boolean } | null;
+  /** sender statistics of the last calls (senders.ts); null when the follower records none for this contract */
+  callers: CallerStats | null;
 }
 
 export interface LiveRanking {
@@ -774,7 +785,8 @@ export function liveRanking(
   // Per-selector volume for the listed contracts, with names.
   const selRows = db
     .prepare(
-      `SELECT g.to_address, g.selector, MAX(g.bucket) AS bucket, SUM(g.tx_count) AS n,
+      `SELECT g.to_address, g.selector, SUM(g.tx_count) AS n,
+              MAX(c.selector IS NOT NULL) AS covered_now,
               c.function_sig, s.name AS sig_name
        FROM window_groups g
        LEFT JOIN coverage c ON c.chain_id = ? AND c.address = g.to_address AND c.selector = g.selector
@@ -786,8 +798,8 @@ export function liveRanking(
     .all(chainId, key, ...addrs) as {
     to_address: string;
     selector: string;
-    bucket: Bucket;
     n: number;
+    covered_now: number;
     function_sig: string | null;
     sig_name: string | null;
   }[];
@@ -799,13 +811,14 @@ export function liveRanking(
         selector: r.selector,
         functionSig: r.function_sig ?? r.sig_name,
         txCount: r.n,
-        covered: r.bucket === "covered_theory",
+        covered: r.covered_now === 1,
       });
     }
     selsOf.set(r.to_address, list);
   }
 
   const verifiedOf = getContracts(db, chainId, addrs);
+  const callersOf = callerStats(db, addrs, (a) => verifiedOf.get(a)?.verified ?? null);
   const selectorCount = new Map<string, number>();
   for (const r of selRows) selectorCount.set(r.to_address, (selectorCount.get(r.to_address) ?? 0) + 1);
 
@@ -827,6 +840,10 @@ export function liveRanking(
       coveredPct: pct(r.covered, r.n),
       distinctSelectors: selectorCount.get(r.to_address) ?? 0,
       topSelectors: selsOf.get(r.to_address) ?? [],
+      proxy: k?.proxyImplementations?.length
+        ? { implementations: k.proxyImplementations, implementationVerified: k.implementationVerified === true }
+        : null,
+      callers: callersOf.get(r.to_address) ?? null,
     };
   });
   return { window, by: "contract", totalTx, total, ...page, contracts };

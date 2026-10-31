@@ -8,6 +8,13 @@
  * Recheck policy: unverified rows are rechecked after a flat 24 hours (someone
  * may verify the contract any day); verified rows after 30 days (only to catch
  * a plain match upgrading to an exact match).
+ *
+ * Proxies: `verified` is 1 only when the called contract and every
+ * implementation behind it are verified. A verified proxy shell in front of
+ * unverified code gives no ABI to write a descriptor from, so it counts as
+ * unverified (the ERC-7730 target study found a token sweeper hidden this
+ * way). Rows saved before proxies were resolved (proxy_checked = 0) are
+ * rechecked first.
  */
 
 import type { Db } from "./index.js";
@@ -25,9 +32,20 @@ export interface ContractRow {
   name: string | null;
   checkedAtIso: string;
   verifiedAtIso: string | null;
+  /** a proxy's implementations, lowercase (null = not a proxy, or checked before proxies were resolved) */
+  proxyImplementations: string[] | null;
+  /** every implementation is verified (null = not a proxy) */
+  implementationVerified: boolean | null;
 }
 
-export type ContractIn = Omit<ContractRow, "checkedAtIso">;
+/**
+ * A sync result. `verified` must already include the proxy rule: true only
+ * when the contract and every implementation behind it are verified.
+ */
+export type ContractIn = Omit<ContractRow, "checkedAtIso" | "proxyImplementations" | "implementationVerified"> & {
+  proxyImplementations?: string[] | null;
+  implementationVerified?: boolean | null;
+};
 
 interface Raw {
   chain_id: number;
@@ -37,9 +55,11 @@ interface Raw {
   name: string | null;
   checked_at: string;
   verified_at: string | null;
+  proxy_impl: string | null;
+  impl_verified: number | null;
 }
 
-const COLS = "chain_id, address, verified, match, name, checked_at, verified_at";
+const COLS = "chain_id, address, verified, match, name, checked_at, verified_at, proxy_impl, impl_verified";
 const CALL_BUCKETS = "('not_covered','covered_theory','token_native')";
 
 /** Flat recheck interval for unverified contracts. */
@@ -56,6 +76,8 @@ function toRow(r: Raw): ContractRow {
     name: r.name,
     checkedAtIso: r.checked_at,
     verifiedAtIso: r.verified_at,
+    proxyImplementations: r.proxy_impl ? r.proxy_impl.split(",") : null,
+    implementationVerified: r.impl_verified === null ? null : r.impl_verified === 1,
   };
 }
 
@@ -84,11 +106,12 @@ export function upsertContracts(db: Db, rows: ContractIn[], now: Date = new Date
   if (rows.length === 0) return;
   const nowIso = now.toISOString();
   const stmt = db.prepare(
-    `INSERT INTO contracts (${COLS}) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO contracts (${COLS}, proxy_checked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
      ON CONFLICT(chain_id, address) DO UPDATE SET
        verified = excluded.verified, match = excluded.match, name = excluded.name,
        checked_at = excluded.checked_at,
-       verified_at = COALESCE(excluded.verified_at, contracts.verified_at)`,
+       verified_at = COALESCE(excluded.verified_at, contracts.verified_at),
+       proxy_impl = excluded.proxy_impl, impl_verified = excluded.impl_verified, proxy_checked = 1`,
   );
   // The per-window contract totals mirror the flag, so the summary needs no
   // join; and the not-covered counter's unv_count follows the flag flips, so
@@ -100,7 +123,9 @@ export function upsertContracts(db: Db, rows: ContractIn[], now: Date = new Date
     for (const r of rs) {
       const addr = r.address.toLowerCase();
       const flag = r.verified ? 1 : 0;
-      stmt.run(r.chainId, addr, flag, r.match, r.name, nowIso, r.verifiedAtIso);
+      const impls = r.proxyImplementations?.length ? r.proxyImplementations.map((a) => a.toLowerCase()).join(",") : null;
+      const implFlag = impls === null || r.implementationVerified == null ? null : r.implementationVerified ? 1 : 0;
+      stmt.run(r.chainId, addr, flag, r.match, r.name, nowIso, r.verifiedAtIso, impls, implFlag);
       if (r.chainId !== LIVE_CHAIN_ID) continue;
       for (const w of WINDOW_KEYS) {
         const cur = current.get(w, addr) as { verified: number | null; not_covered_tx: number } | undefined;
@@ -144,7 +169,7 @@ export function contractsToCheck(db: Db, opts: { chainId: number; limit?: number
         WHERE g.block_time >= ? AND g.bucket IN ${CALL_BUCKETS} AND g.to_address <> ''
           AND (c.address IS NULL
                OR (c.verified = 0 AND c.checked_at < ?)
-               OR (c.verified = 1 AND c.checked_at < ?))
+               OR (c.verified = 1 AND (c.checked_at < ? OR c.proxy_checked = 0)))
         GROUP BY g.to_address
         ORDER BY n DESC
         LIMIT ?`,
@@ -167,7 +192,7 @@ export function contractsQueueSize(db: Db, chainId: number, now: Date = new Date
            FROM block_groups g
            LEFT JOIN contracts c ON c.chain_id = ? AND c.address = g.to_address
           WHERE g.block_time >= ? AND g.bucket IN ${CALL_BUCKETS} AND g.to_address <> ''
-            AND (c.address IS NULL OR (c.verified = 0 AND c.checked_at < ?) OR (c.verified = 1 AND c.checked_at < ?))
+            AND (c.address IS NULL OR (c.verified = 0 AND c.checked_at < ?) OR (c.verified = 1 AND (c.checked_at < ? OR c.proxy_checked = 0)))
           GROUP BY g.to_address)`,
     )
     .get(chainId, fromIso, unverifiedCutoff, verifiedCutoff) as { n: number };

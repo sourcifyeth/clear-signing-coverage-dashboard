@@ -24,7 +24,7 @@ import {
   type LiveTxOut,
 } from "@ccd/db";
 import type { Rpc, RpcTx } from "@ccd/rpc";
-import { checkContract, createLiveClassifier, loadCoverageLookup, lookupSignatures, type LiveClassifier } from "@ccd/worker/live";
+import { checkContract, contractInFromCheck, createLiveClassifier, loadCoverageLookup, lookupSignatures, type LiveClassifier } from "@ccd/worker/live";
 
 export type OnDemandTx = LiveTxDetailOut & { onDemand: true };
 export type OnDemandBlock = BlockDetail & { onDemand: true };
@@ -119,13 +119,11 @@ export function createOnDemand(opts: { db: Db; rpc: Rpc; chainId: number; regist
     if (!live) return { verified: null, name: null };
     const c = await checkContract(chainId, address);
     if (c.kind === "skip") return { verified: null, name: null };
-    const now = new Date();
-    if (c.kind === "verified") {
-      upsertContracts(db, [{ chainId, address, verified: true, match: c.match, name: c.name, verifiedAtIso: c.verifiedAtIso }], now);
-      return { verified: true, name: c.name };
-    }
-    upsertContracts(db, [{ chainId, address, verified: false, match: null, name: null, verifiedAtIso: null }], now);
-    return { verified: false, name: null };
+    // The same row the follower's sync writes: a verified proxy in front of
+    // unverified code counts as unverified.
+    const fresh = contractInFromCheck(chainId, address, c);
+    upsertContracts(db, [fresh], new Date());
+    return { verified: fresh.verified, name: fresh.name };
   }
 
   function toOut(

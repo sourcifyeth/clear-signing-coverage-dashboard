@@ -7,9 +7,11 @@
  * coverage set, runs the Sourcify clear-signing library on every covered
  * transaction (pass / partial / failed + warning codes), and writes one SQLite
  * transaction per block: a `blocks` row, one `tx_index` row per transaction
- * (hash + labels + the library's result for covered ones — never calldata,
- * value or sender), and per-block `block_groups` aggregates that the
- * rolling-window stats sum over.
+ * (hash + labels + the library's result for covered ones — never calldata
+ * or value), and per-block `block_groups` aggregates that the rolling-window
+ * stats sum over. For the busiest contracts it also records the sender of
+ * each call in `contract_senders` (the last 600 per contract), for the
+ * caller statistics.
  *
  * Reorgs: each new block's parentHash is checked against the stored hash of
  * block n-1. On mismatch the follower walks back (up to REORG_DEPTH blocks)
@@ -30,6 +32,9 @@
  *   RANKING_EVERY_MS how often the stored rankings are refreshed, default 60000
  *   REBUILD_WINDOWS  "1" forces a rebuild of the window tables at start
  *                    (otherwise they are kept when they end at the stored head)
+ *   SENDER_TRACK     how many of the 24h window's busiest contracts get their
+ *                    last 600 senders recorded for the caller statistics,
+ *                    default 2000; "0" turns it off (see @ccd/db senders.ts)
  *
  * Usage: npm run follow
  */
@@ -47,6 +52,10 @@ import {
   ensureWindows,
   refreshWindowRankingsIfDue,
   pruneContracts,
+  trackedContracts,
+  insertSenders,
+  trimSenders,
+  TRACKED_CONTRACTS,
   blockHash,
   latestBlock,
   type Bucket,
@@ -70,6 +79,7 @@ const RANKING_EVERY_MS = Number(process.env.RANKING_EVERY_MS ?? 60_000);
 const POLL_MS = Number(process.env.POLL_MS ?? 4000);
 // At least 7: the 7d window needs its blocks kept until they expire from it.
 const RETENTION_DAYS = Math.max(7, Number(process.env.RETENTION_DAYS ?? 7));
+const SENDER_TRACK = Math.max(0, Number(process.env.SENDER_TRACK ?? TRACKED_CONTRACTS));
 const REGISTRY_PATH = path.resolve(
   process.env.REGISTRY_PATH ?? path.resolve(__dirname, "../../../../../clear-signing-erc7730-registry"),
 );
@@ -164,6 +174,12 @@ async function main(): Promise<void> {
   else next = await rpc.blockNumber();
   log(`follower: starting at block ${next}${stored ? ` (stored head ${stored.number})` : ""}`);
 
+  // Caller statistics: the senders of the busiest contracts, refreshed with
+  // the prune cycle. The set comes from the 24h window, so it is empty on a
+  // fresh database and fills at the first prune.
+  let tracked = trackedContracts(db, SENDER_TRACK);
+  log(`follower: recording senders for ${tracked.size} contracts`);
+
   let backoff = 1000;
   let processed = 0;
 
@@ -203,6 +219,15 @@ async function main(): Promise<void> {
         txs,
         groups,
       );
+      if (tracked.size > 0) {
+        const senders = [];
+        for (let i = 0; i < block.transactions.length; i++) {
+          const t = block.transactions[i];
+          const to = t.to?.toLowerCase();
+          if (to && tracked.has(to)) senders.push({ address: to, sender: t.from.toLowerCase(), position: i });
+        }
+        insertSenders(db, next, senders);
+      }
 
       const counts: Record<Bucket, number> = { contract_creation: 0, eth_transfer: 0, covered_theory: 0, token_native: 0, not_covered: 0 };
       const st: Record<PracticalStatus, number> = { pass: 0, partial: 0, failed: 0 };
@@ -239,6 +264,13 @@ async function main(): Promise<void> {
         // Verification cache rows outlive their last call only until this prune.
         const staleContracts = pruneContracts(db, CHAIN_ID);
         if (staleContracts) log(`follower: pruned ${staleContracts} contract rows no block in the window calls`);
+        // Senders: keep the newest 600 per tracked contract and nothing older
+        // than the oldest stored block, then pick the busiest contracts again.
+        const oldest = (db.prepare("SELECT MIN(number) AS n FROM blocks").get() as { n: number | null }).n;
+        const t1 = Date.now();
+        const trimmed = trimSenders(db, tracked, oldest);
+        tracked = trackedContracts(db, SENDER_TRACK);
+        log(`follower: senders trimmed by ${trimmed} rows in ${Date.now() - t1} ms; recording ${tracked.size} contracts`);
         // Fold the write-ahead log back into the main file and truncate it.
         // The automatic checkpoint cannot complete while the API holds a long
         // read, so the log grew to a gigabyte; this one runs between blocks.

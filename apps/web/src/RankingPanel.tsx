@@ -5,19 +5,32 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import type { InfraTag, LiveRanking, RankedContractRow, RankedSelector } from "./types.ts";
+import type { CallerStats, InfraTag, LiveRanking, RankedContractRow, RankedSelector } from "./types.ts";
 import { fmtInt, fmtPct, short } from "./buckets.ts";
 import { canonicalSig, clip, contractUrl, fnShort, knownName, REGISTRY_REPO } from "./txMeta.ts";
 
 const REFETCH_MIN_MS = 30_000;
 const PAGE_SIZES = [25, 50, 100] as const;
 
-/** Sourcify verification pill, table-sized. Nothing while the cache has not classified the address. */
-function VerifiedMini({ verified }: { verified: boolean | null | undefined }) {
+/**
+ * Sourcify verification pill, table-sized. Nothing while the cache has not
+ * classified the address. A proxy counts as verified only when the code
+ * behind it is verified too.
+ */
+function VerifiedMini({ verified, proxy }: { verified: boolean | null | undefined; proxy?: RankedContractRow["proxy"] }) {
   if (verified === true)
     return (
-      <span className="verifyBadge yes mini" data-tip="Verified on Sourcify">
+      <span className="verifyBadge yes mini" data-tip={proxy ? "Verified on Sourcify: the proxy and its implementation" : "Verified on Sourcify"}>
         <img src="/sourcify.png" alt="" /> Verified
+      </span>
+    );
+  if (verified === false && proxy && !proxy.implementationVerified)
+    return (
+      <span
+        className="verifyBadge no mini"
+        data-tip={`The proxy is verified, but the code behind it (${proxy.implementations.map(short).join(", ")}) is not; no ABI to write a descriptor from`}
+      >
+        ⊘ Proxy only
       </span>
     );
   if (verified === false)
@@ -27,6 +40,39 @@ function VerifiedMini({ verified }: { verified: boolean | null | undefined }) {
       </span>
     );
   return null;
+}
+
+const VERDICT_LABEL: Record<CallerStats["verdict"], { cls: string; text: string }> = {
+  users: { cls: "ok", text: "👤 Users" },
+  review: { cls: "part", text: "🔍 Review" },
+  bots: { cls: "no", text: "🤖 Bot-like" },
+  collecting: { cls: "native", text: "⏳ Collecting" },
+};
+
+/**
+ * Who sends the calls: the ERC-7730 target study's signal over the last
+ * (up to) 600 calls. A hint only; the "Bots & infra" exclusion is still the
+ * hand-kept list.
+ */
+function CallersCell({ c }: { c: CallerStats | null | undefined }) {
+  if (c === undefined) return null;
+  if (c === null) return <span className="muted small" title="Senders are recorded for the 2000 busiest contracts of the last 24h">–</span>;
+  const v = VERDICT_LABEL[c.verdict];
+  const tip =
+    `${c.reason}.\n` +
+    `Last ${fmtInt(c.sample)} calls: ${fmtInt(c.signers)} distinct senders, ` +
+    `${fmtPct(c.oneShotPct)} call once, ${fmtPct(c.twoShotPct)} at most twice, ` +
+    `busiest sender ${fmtPct(c.topSenderPct)} of the calls.\n` +
+    `Rule (ERC-7730 target study): under 20 senders or under 35% one-time senders looks like bots; 35–50% needs a review; ` +
+    `50% and more looks like people, if the source is verified.`;
+  return (
+    <span className="callersCell" title={tip}>
+      <span className={`badge ${v.cls}`}>{v.text}</span>
+      <span className="muted small">
+        {fmtInt(c.signers)} senders · {fmtPct(c.oneShotPct)} once
+      </span>
+    </span>
+  );
 }
 
 /** "Bots & infra" pill for a contract on the server's list; the reason is in the hover text. Exported for the transaction modal. */
@@ -121,8 +167,9 @@ export function RankingPanel({
         </h3>
       </div>
       <p className="muted small">
-        Every contract called in the window, most transactions first. ✅ has an ERC-7730 descriptor
-        for the call, ❌ does not.
+        Every contract called in the window, most transactions first. ✅ the function has an ERC-7730
+        descriptor in the current registry, ❌ it does not. Callers: who sent the last 600 calls, a hint for
+        spotting bots and infrastructure (hover for the numbers).
         {excluding && " Excluded kinds (see the control row above) are left out."}
         {data && (
           <>
@@ -239,7 +286,7 @@ function ContractCell({ row }: { row: RankedContractRow }) {
             {short(row.toAddress)}
           </span>
         )}{" "}
-        <VerifiedMini verified={row.verified} />
+        <VerifiedMini verified={row.verified} proxy={row.proxy} />
         <InfraMini infra={row.infra} />
       </span>
     </span>
@@ -259,6 +306,7 @@ function ContractTable({ rows, offset }: { rows: RankedContractRow[]; offset: nu
             <th className="r">Txs</th>
             <th className="r">Share</th>
             <th className="r">Cum.</th>
+            <th>Callers</th>
             <th>Functions called</th>
           </tr>
         </thead>
@@ -285,6 +333,9 @@ function ContractTable({ rows, offset }: { rows: RankedContractRow[]; offset: nu
               <td className="r">{fmtInt(c.txCount)}</td>
               <td className="r">{fmtPct(c.sharePct)}</td>
               <td className="r muted">{fmtPct(c.cumulativePct)}</td>
+              <td>
+                <CallersCell c={c.callers} />
+              </td>
               <td>
                 <div className="sels">
                   {c.topSelectors.map((s) => (

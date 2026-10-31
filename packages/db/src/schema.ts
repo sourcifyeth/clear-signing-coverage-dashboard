@@ -268,6 +268,20 @@ CREATE TABLE IF NOT EXISTS contracts (
   verified_at TEXT,
   PRIMARY KEY (chain_id, address)
 );
+
+-- The last SENDER_SAMPLE senders of each busy contract (the busiest
+-- TRACKED_CONTRACTS of the 24h window), for the caller statistics of the
+-- ERC-7730 target study (senders.ts). seq = block number * 100000 + position
+-- in the block, so "the newest N" is an index range. Written by the follower
+-- with every block, trimmed to N per contract and to the retention window with
+-- the block prune, rewound with the blocks on a reorg.
+CREATE TABLE IF NOT EXISTS contract_senders (
+  address TEXT    NOT NULL,   -- lowercase 0x, the transaction's to
+  seq     INTEGER NOT NULL,
+  sender  TEXT    NOT NULL,   -- lowercase 0x, the transaction's from
+  PRIMARY KEY (address, seq)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS contract_senders_seq ON contract_senders (seq);
 `;
 
 /**
@@ -305,4 +319,12 @@ export const ADDED_COLUMNS: { table: string; name: string; ddl: string; backfill
   // `exclude=unverified` denominator). No backfill: the follower rebuilds the
   // window tables at start.
   { table: "window_counters", name: "unv_count", ddl: "unv_count INTEGER NOT NULL DEFAULT 0" },
+  // Proxy resolution in the Sourcify sync. `verified` is 1 only when the
+  // contract and, for a proxy, every implementation behind it are verified.
+  // proxy_impl lists the implementations (comma-separated, lowercase),
+  // impl_verified says whether they all are. proxy_checked = 0 marks the rows
+  // written before proxies were resolved: the sync rechecks those first.
+  { table: "contracts", name: "proxy_checked", ddl: "proxy_checked INTEGER NOT NULL DEFAULT 0" },
+  { table: "contracts", name: "proxy_impl", ddl: "proxy_impl TEXT" },
+  { table: "contracts", name: "impl_verified", ddl: "impl_verified INTEGER" },
 ];

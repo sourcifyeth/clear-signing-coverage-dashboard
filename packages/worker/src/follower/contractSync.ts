@@ -12,6 +12,12 @@
  *   404 -> not verified
  *   anything else, timeout, network error -> skipped, retried next round
  *
+ * Proxies: the same request asks for Sourcify's proxy resolution. For a proxy,
+ * every implementation is looked up too (one more request each, same rate
+ * limit). The contract counts as verified only when they all are; then the
+ * name is the implementation's (FiatTokenV2_2, not FiatTokenProxy). A failed
+ * implementation lookup skips the whole address until the next round.
+ *
  * The fetches are async, so block processing never waits on Sourcify; the
  * SQLite writes are one short transaction per round on the follower's own
  * connection, which is safe because better-sqlite3 calls are synchronous and
@@ -34,35 +40,98 @@ const TIMEOUT_MS = 8000;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-export type ContractCheck = { kind: "verified"; match: MatchKind; name: string | null; verifiedAtIso: string | null } | { kind: "unverified" } | { kind: "skip"; why: string };
+/** A proxy's implementations and whether every one of them is verified on Sourcify. */
+export interface ProxyCheck {
+  implementations: string[];
+  implementationVerified: boolean;
+}
+
+export type ContractCheck =
+  | { kind: "verified"; match: MatchKind; name: string | null; verifiedAtIso: string | null; proxy: ProxyCheck | null }
+  | { kind: "unverified" }
+  | { kind: "skip"; why: string };
 type Check = ContractCheck;
 
 interface SourcifyContract {
   match?: string;
   verifiedAt?: string;
   compilation?: { name?: string };
+  proxyResolution?: { isProxy?: boolean; implementations?: { address?: string; name?: string }[] } | null;
 }
 
-/** One Sourcify lookup (with SOURCIFY_TOKEN when set). Shared with the API's on-demand path. */
+/** Diamonds list one implementation per facet; past this many the address is left as checked by its own source only. */
+const MAX_IMPLEMENTATIONS = 10;
+
+/** One Sourcify lookup (with SOURCIFY_TOKEN when set), proxy resolved. Shared with the API's on-demand path. */
 export async function checkContract(chainId: number, address: string): Promise<ContractCheck> {
-  return check(chainId, address);
+  return check(chainId, address, async () => {});
 }
 
-async function check(chainId: number, address: string): Promise<Check> {
+/** The cache row for a check, with the proxy rule applied: verified only when every implementation is. */
+export function contractInFromCheck(chainId: number, address: string, c: Exclude<ContractCheck, { kind: "skip" }>): ContractIn {
+  if (c.kind === "unverified") {
+    return { chainId, address, verified: false, match: null, name: null, verifiedAtIso: null, proxyImplementations: null, implementationVerified: null };
+  }
+  return {
+    chainId,
+    address,
+    verified: c.proxy ? c.proxy.implementationVerified : true,
+    match: c.match,
+    name: c.name,
+    verifiedAtIso: c.verifiedAtIso,
+    proxyImplementations: c.proxy?.implementations ?? null,
+    implementationVerified: c.proxy?.implementationVerified ?? null,
+  };
+}
+
+async function getJson(url: string): Promise<{ status: number; body: SourcifyContract | null } | { error: string }> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(`${SOURCIFY}/v2/contract/${chainId}/${address}?fields=compilation`, { signal: ctl.signal, headers: HEADERS });
-    if (res.status === 404) return { kind: "unverified" };
-    if (!res.ok) return { kind: "skip", why: `HTTP ${res.status}` };
-    const body = (await res.json()) as SourcifyContract;
-    const match: MatchKind = body.match === "exact_match" ? "exact_match" : "match";
-    return { kind: "verified", match, name: body.compilation?.name ?? null, verifiedAtIso: body.verifiedAt ?? null };
+    const res = await fetch(url, { signal: ctl.signal, headers: HEADERS });
+    if (!res.ok) return { status: res.status, body: null };
+    return { status: res.status, body: (await res.json()) as SourcifyContract };
   } catch (e) {
-    return { kind: "skip", why: (e as Error).name === "AbortError" ? "timeout" : (e as Error).message };
+    return { error: (e as Error).name === "AbortError" ? "timeout" : (e as Error).message };
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** `throttle` runs before every request, so the implementation lookups share the rate limit. */
+async function check(chainId: number, address: string, throttle: () => Promise<void>): Promise<Check> {
+  await throttle();
+  const r = await getJson(`${SOURCIFY}/v2/contract/${chainId}/${address}?fields=compilation.name,proxyResolution`);
+  if ("error" in r) return { kind: "skip", why: r.error };
+  if (r.status === 404) return { kind: "unverified" };
+  if (!r.body) return { kind: "skip", why: `HTTP ${r.status}` };
+  const body = r.body;
+  const match: MatchKind = body.match === "exact_match" ? "exact_match" : "match";
+  const base = { kind: "verified" as const, match, name: body.compilation?.name ?? null, verifiedAtIso: body.verifiedAt ?? null };
+
+  const impls = (body.proxyResolution?.isProxy ? (body.proxyResolution.implementations ?? []) : [])
+    .map((i) => i.address?.toLowerCase())
+    .filter((a): a is string => !!a && /^0x[0-9a-f]{40}$/.test(a));
+  if (impls.length === 0 || impls.length > MAX_IMPLEMENTATIONS) return { ...base, proxy: null };
+
+  let allVerified = true;
+  let implName: string | null = null;
+  for (const impl of impls) {
+    await throttle();
+    const ir = await getJson(`${SOURCIFY}/v2/contract/${chainId}/${impl}?fields=compilation.name`);
+    if ("error" in ir) return { kind: "skip", why: `implementation ${impl}: ${ir.error}` };
+    if (ir.status === 404) {
+      allVerified = false;
+      continue;
+    }
+    if (!ir.body) return { kind: "skip", why: `implementation ${impl}: HTTP ${ir.status}` };
+    implName ??= ir.body.compilation?.name ?? null;
+  }
+  return {
+    ...base,
+    name: allVerified && implName ? implName : base.name,
+    proxy: { implementations: impls, implementationVerified: allVerified },
+  };
 }
 
 export interface ContractSyncOptions {
@@ -110,29 +179,27 @@ export function startContractSync(db: ReturnType<typeof openDb>, opts: ContractS
     let skipped = 0;
     let verified = 0;
     let unverified = 0;
+    let proxyOnly = 0;
     let lastSkip = "";
     for (const t of todo) {
       if (stopping) break;
-      await throttle();
-      const r = await check(opts.chainId, t.address);
+      const r = await check(opts.chainId, t.address, throttle);
       if (r.kind === "skip") {
         skipped++;
         lastSkip = r.why;
         continue;
       }
-      if (r.kind === "verified") {
-        verified++;
-        out.push({ chainId: opts.chainId, address: t.address, verified: true, match: r.match, name: r.name, verifiedAtIso: r.verifiedAtIso });
-      } else {
-        unverified++;
-        out.push({ chainId: opts.chainId, address: t.address, verified: false, match: null, name: null, verifiedAtIso: null });
-      }
+      const row = contractInFromCheck(opts.chainId, t.address, r);
+      if (row.verified) verified++;
+      else if (r.kind === "verified") proxyOnly++;
+      else unverified++;
+      out.push(row);
     }
     if (out.length > 0) upsertContracts(db, out);
     const queue = contractsQueueSize(db, opts.chainId);
     const totals = contractCounts(db, opts.chainId);
     log(
-      `checked ${out.length} (${verified} verified, ${unverified} unverified), skipped ${skipped}${skipped ? ` (last: ${lastSkip})` : ""}; queue ${queue}; cache ${totals.total} rows (${totals.verified} verified)`,
+      `checked ${out.length} (${verified} verified, ${unverified} unverified, ${proxyOnly} verified proxies with unverified implementations), skipped ${skipped}${skipped ? ` (last: ${lastSkip})` : ""}; queue ${queue}; cache ${totals.total} rows (${totals.verified} verified)`,
     );
   }
 
