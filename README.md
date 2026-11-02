@@ -70,6 +70,7 @@ SQLite in WAL mode is enough; no database server is needed. Tables:
 | `window_counters`, `window_contracts` | follower | derived from the window groups with every block: per-window counts per (bucket, status) with the standard-token-selector share, and per-window totals per contract (calls, calls without standard selectors, covered calls, not-covered calls, Sourcify verified flag) with indexes on the counts. The summary reads the counters; the ranking pages read the contracts through the indexes, so no request groups the long tail |
 | `window_ranking` | follower | the "what to build next" result per window (top 100 not-covered contracts with selectors, the cumulative curve, the 80% / 95% ranks for each exclusion combination, the verification split), computed once per block from `window_contracts` and returned by the summary as is |
 | `tx_index`  | follower   | one row per transaction: hash, block, to, selector, bucket, and for covered ones the library's status, warning codes, one-line intent and the full display model as JSON (capped at 8 KB). 7-day retention via `pruneLive()` |
+| `bot_contracts` | follower | the contracts whose caller verdict is `bots`, which the `infra` exclusion removes together with the hand-kept list (see "Caller statistics" below). Updated every 100 blocks |
 | `contract_senders` | follower | the last 600 senders of each of the 2000 busiest contracts of the 24h window, for the caller statistics (see "Caller statistics" below). Trimmed to 600 per contract and to the stored blocks every 100 blocks; rewound with the blocks on a reorg |
 | `contracts` | follower (Sourcify sync) | Sourcify verification per called address, with the proxy resolved: `verified` is 1 only when the contract and every implementation behind it are verified; `proxy_impl` / `impl_verified` keep the implementations |
 
@@ -262,10 +263,15 @@ The first list comes from the ERC-7730 target study of 2026-10-16, which read
 the 40 busiest mainnet contracts against their source, selector traffic and
 callers and found 19 that fail the "an end user signs a transaction to it"
 rule, plus one undetermined router kept on the list until someone decides.
-To add a contract, append an entry; no database change is needed. The API
-serves the list at `GET /api/live/infra`, tags every transaction and ranking
-row of a listed contract with `infra: { name, kind, reason }`, and the web
-app shows a "Bots & infra" pill with the reason on hover.
+To add a contract, append an entry; no database change is needed.
+
+The follower adds to the list at run time: a busy contract whose callers look
+like bots goes in the table `bot_contracts` (see "Caller statistics" below),
+and the exclusion removes it too. The API serves both at
+`GET /api/live/infra` (`contracts`: the hand-kept list, `detected`: the
+table), tags every transaction and ranking row of such a contract with
+`infra: { name, kind, reason }` (`kind` is `auto-callers` for a detected
+one), and the web app shows a "Bots & infra" pill with the reason on hover.
 
 ### Caller statistics
 
@@ -276,7 +282,7 @@ keys (one-shot share under 40%); routers, bridges, tokens and marketplaces sit
 between 57% and 98%. With two gates (verified source with the proxy resolved,
 and at least 20 distinct senders) the rule matched all 40 verdicts.
 
-The dashboard computes it, as a hint for a person:
+The dashboard computes it, and uses the verdict to exclude bots:
 
 1. The follower takes the 2000 busiest contracts of the 24h window
    (`SENDER_TRACK`) and records the sender of every transaction to them in
@@ -298,14 +304,24 @@ The dashboard computes it, as a hint for a person:
 
 4. The web table shows it in the "Callers" column; the hover text has all
    the numbers and the rule.
+5. Every 100 blocks the follower updates `bot_contracts` from the verdicts of
+   the tracked contracts: `bots` adds the contract, `users` removes it, and
+   `review` or `collecting` changes nothing. So a contract near a limit does
+   not go in and out between two cycles. A contract with no recorded sender
+   left (its calls aged out of the stored blocks) is removed.
+6. The `infra` exclusion (on by default) removes the calls to every contract
+   in `bot_contracts`, the same way as the calls to the hand-kept list: from
+   the headline, the totals, the ranking and the block strip.
 
-Nothing is excluded because of the verdict: the hand-kept list stays the only
-`infra` exclusion. A `bots` verdict on a contract that is not on the list is a
-candidate to read and, if it holds, to add. The study's final verdicts also
-needed per-selector sender splits, sender nonces and calldata checks, which
-this does not do. On a new database the column fills from the first prune
-cycle (100 blocks) on, and a contract's sample reaches 600 calls as its
-traffic arrives.
+The rule can be wrong: it sees only who sends the calls. For example, CoW
+Protocol's `GPv2Settlement` gets `bots`, because solvers send its
+transactions. That is correct for this dashboard (users sign an order
+off-chain, not a transaction to it), but other contracts can have a few
+operators that send for many people. The study's final verdicts also needed per-selector sender splits,
+sender nonces and calldata checks, which this does not do. A contract that the
+rule marks wrongly needs a code change: there is no allow list yet. On a new
+database the table fills from the first prune cycle (100 blocks) on, and a
+contract gets a verdict when 50 of its calls are recorded.
 
 Each row in `recent` carries `functionSig` and `displayText`. The signature
 comes from the registry descriptor for covered transactions, and from

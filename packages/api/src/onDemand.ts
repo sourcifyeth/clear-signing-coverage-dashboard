@@ -14,8 +14,8 @@ import {
   upsertContracts,
   upsertSignatures,
   STANDARD_TOKEN_SELECTORS,
-  INFRA_ADDRESSES,
-  infraTagOf,
+  infraAddresses,
+  infraTagFor,
   type BlockDetail,
   type BlockStat,
   type Db,
@@ -150,7 +150,7 @@ export function createOnDemand(opts: { db: Db; rpc: Rpc; chainId: number; regist
       descriptorPath: hit?.descriptorPath ?? null,
       verified: ver.verified,
       sourcifyName: ver.name,
-      infra: infraTagOf(row.toAddress),
+      infra: infraTagFor(db, row.toAddress),
     };
   }
 
@@ -225,6 +225,7 @@ export function createOnDemand(opts: { db: Db; rpc: Rpc; chainId: number; regist
         infraStd: 0,
         infraUnverified: 0,
       };
+      const infra = infraAddresses(db);
       const txs: LiveTxOut[] = [];
       for (const r of rows) {
         const std = STANDARD_TOKEN_SELECTORS.has(r.selector);
@@ -237,7 +238,7 @@ export function createOnDemand(opts: { db: Db; rpc: Rpc; chainId: number; regist
           stat.notCovered++;
           if (k && !k.verified) stat.notCoveredUnverified++;
         }
-        if (r.toAddress && INFRA_ADDRESSES.has(r.toAddress)) {
+        if (r.toAddress && infra.has(r.toAddress)) {
           stat.infra++;
           if (std) stat.infraStd++;
           if (r.bucket === "not_covered" && k && !k.verified) stat.infraUnverified++;

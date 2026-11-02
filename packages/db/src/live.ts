@@ -12,8 +12,8 @@ import type { Bucket, PracticalStatus } from "./write.js";
 import { pct, type RankedContract } from "./ranking.js";
 import { STANDARD_TOKEN_SELECTORS_SQL, excludeSql, type ExcludeOptions } from "./selectors.js";
 import { getContracts } from "./contracts.js";
-import { INFRA_ADDRESSES_SQL, infraTagOf, type InfraTag } from "./infra.js";
-import { callerStats, deleteSendersFrom, type CallerStats } from "./senders.js";
+import { botInfraTag, infraInSql, infraTagOf, type InfraTag } from "./infra.js";
+import { callerStats, deleteSendersFrom, infraTagFor, type CallerStats } from "./senders.js";
 import {
   addBlockToWindows,
   removeBlockFromWindows,
@@ -383,17 +383,19 @@ interface RawLiveTx {
   sig_name: string | null;
   k_verified: number | null;
   k_name: string | null;
+  bot_reason?: string | null;
 }
 
 /** Binds chainId twice (coverage join, contracts join) before any WHERE params. */
 const LIVE_TX_SELECT = `
   SELECT t.tx_hash, t.block_number, t.block_hash, t.block_time, t.to_address, t.selector, t.bucket, t.status,
          t.warnings_json, t.intent, t.display_json, c.entity, c.function_sig, c.descriptor_path, s.name AS sig_name,
-         k.verified AS k_verified, k.name AS k_name
+         k.verified AS k_verified, k.name AS k_name, bc.reason AS bot_reason
   FROM tx_index t
   LEFT JOIN coverage c ON c.chain_id = ? AND c.address = t.to_address AND c.selector = t.selector
   LEFT JOIN signatures s ON s.selector = t.selector
-  LEFT JOIN contracts k ON k.chain_id = ? AND k.address = t.to_address`;
+  LEFT JOIN contracts k ON k.chain_id = ? AND k.address = t.to_address
+  LEFT JOIN bot_contracts bc ON bc.address = t.to_address`;
 
 // ---------------------------------------------------------------------------
 // Selector -> signature cache (filled by the follower from 4byte.sourcify.dev)
@@ -486,7 +488,7 @@ function toLiveTx(r: RawLiveTx): LiveTxOut {
     descriptorPath: r.descriptor_path,
     verified: r.k_verified === null || r.k_verified === undefined ? null : r.k_verified === 1,
     sourcifyName: r.k_name ?? null,
-    infra: infraTagOf(r.to_address),
+    infra: infraTagOf(r.to_address) ?? (r.bot_reason ? botInfraTag(r.bot_reason) : null),
   };
 }
 
@@ -575,9 +577,9 @@ function blockStatSelect(chainId: number): string {
               SUM(CASE WHEN g.bucket = 'not_covered' THEN g.tx_count ELSE 0 END) AS not_covered,
               SUM(CASE WHEN g.bucket = 'not_covered' AND k.verified = 0 THEN g.tx_count ELSE 0 END) AS not_covered_unverified,
               SUM(CASE WHEN g.bucket = 'contract_creation' THEN g.tx_count ELSE 0 END) AS creation,
-              SUM(CASE WHEN g.to_address IN (${INFRA_ADDRESSES_SQL}) THEN g.tx_count ELSE 0 END) AS infra,
-              SUM(CASE WHEN g.to_address IN (${INFRA_ADDRESSES_SQL}) AND g.selector IN (${STANDARD_TOKEN_SELECTORS_SQL}) THEN g.tx_count ELSE 0 END) AS infra_std,
-              SUM(CASE WHEN g.to_address IN (${INFRA_ADDRESSES_SQL}) AND g.bucket = 'not_covered' AND k.verified = 0 THEN g.tx_count ELSE 0 END) AS infra_unverified
+              SUM(CASE WHEN ${infraInSql("g.to_address")} THEN g.tx_count ELSE 0 END) AS infra,
+              SUM(CASE WHEN ${infraInSql("g.to_address")} AND g.selector IN (${STANDARD_TOKEN_SELECTORS_SQL}) THEN g.tx_count ELSE 0 END) AS infra_std,
+              SUM(CASE WHEN ${infraInSql("g.to_address")} AND g.bucket = 'not_covered' AND k.verified = 0 THEN g.tx_count ELSE 0 END) AS infra_unverified
        FROM block_groups g
        LEFT JOIN contracts k ON k.chain_id = ${Math.floor(Number(chainId))} AND k.address = g.to_address`;
 }
@@ -746,11 +748,12 @@ export function liveRanking(
   // nothing here, since ETH sends are not contract calls. excludeUnverified
   // drops the contracts Sourcify knows to be unverified as whole rows (their
   // rare covered calls with them), so the page stays an ordered index read.
-  // excludeInfra drops the listed bots & infrastructure contracts the same way.
+  // excludeInfra drops the bots & infrastructure contracts (the hand-kept list
+  // and bot_contracts) the same way.
   const col = opts.excludeToken ? "tx_ex_token" : "tx_count";
   const covCol = opts.excludeToken ? "covered_ex_token" : "covered_tx";
   const wc = `window = ? AND ${col} > 0${opts.excludeUnverified ? " AND COALESCE(verified, 1) <> 0" : ""}${
-    opts.excludeInfra ? ` AND to_address NOT IN (${INFRA_ADDRESSES_SQL})` : ""
+    opts.excludeInfra ? ` AND NOT ${infraInSql("to_address")}` : ""
   }`;
   const agg = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(${col}), 0) AS tx FROM window_contracts WHERE ${wc}`).get(key) as { n: number; tx: number };
   const total = agg.n;
@@ -832,7 +835,7 @@ export function liveRanking(
       inRegistry: entityOf.has(r.to_address),
       verified: k ? k.verified : null,
       sourcifyName: k?.name ?? null,
-      infra: infraTagOf(r.to_address),
+      infra: infraTagFor(db, r.to_address),
       txCount: r.n,
       sharePct: pct(r.n, totalTx),
       cumulativePct: pct(cum, totalTx),

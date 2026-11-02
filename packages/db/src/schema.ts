@@ -282,6 +282,16 @@ CREATE TABLE IF NOT EXISTS contract_senders (
   PRIMARY KEY (address, seq)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS contract_senders_seq ON contract_senders (seq);
+
+-- Contracts whose recorded senders look like bots (senders.ts, updateBotContracts).
+-- The bots & infrastructure exclusion removes them together with the
+-- hand-kept list in infra.ts.
+CREATE TABLE IF NOT EXISTS bot_contracts (
+  address       TEXT    PRIMARY KEY,  -- lowercase 0x
+  reason        TEXT    NOT NULL,     -- the caller verdict's one-line reason
+  since_block   INTEGER NOT NULL,     -- first block at which it was marked
+  updated_block INTEGER NOT NULL      -- last block at which the verdict was "bots"
+) WITHOUT ROWID;
 `;
 
 /**

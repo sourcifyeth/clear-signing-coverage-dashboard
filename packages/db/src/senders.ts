@@ -14,12 +14,19 @@
  *
  * Here the follower keeps the last SENDER_SAMPLE senders of the busiest
  * TRACKED_CONTRACTS of the 24h window in `contract_senders`, and the API
- * computes the numbers for the rows it serves. The verdict is a hint for a
- * person: nothing is excluded because of it. The hand-kept list in infra.ts
- * stays the only exclusion.
+ * computes the numbers for the rows it serves.
+ *
+ * The verdict also feeds the bots & infrastructure exclusion. At each prune
+ * cycle the follower runs updateBotContracts: a contract with the verdict
+ * "bots" goes in the table bot_contracts, and the exclusion removes its calls
+ * the same way as the calls to the hand-kept list in infra.ts. A contract
+ * leaves the table only when its verdict becomes "users". In the review band
+ * it keeps its state, so a contract near a limit does not change state
+ * between two cycles.
  */
 
 import type { Db } from "./index.js";
+import { INFRA_ADDRESSES, botInfraTag, infraTagOf, type InfraTag } from "./infra.js";
 
 /** Senders kept per contract: the study's sample size. */
 export const SENDER_SAMPLE = 600;
@@ -168,4 +175,76 @@ export function callerStats(db: Db, addresses: string[], verifiedOf: (address: s
     out.set(a, { ...base, ...callerVerdict(base, verifiedOf(a)) });
   }
   return out;
+}
+
+export interface BotContract {
+  address: string;
+  reason: string;
+  sinceBlock: number;
+  updatedBlock: number;
+}
+
+/**
+ * Update bot_contracts from the recorded senders of `addresses` (the tracked
+ * contracts) at block `blockNumber`:
+ * - verdict "bots": add the contract, or refresh its reason;
+ * - verdict "users": remove it;
+ * - "review" or "collecting": no change.
+ * A contract with no recorded sender left (its calls aged out of the
+ * retention window) is removed too.
+ */
+export function updateBotContracts(db: Db, addresses: Iterable<string>, blockNumber: number): { added: number; removed: number; total: number } {
+  const stats = callerStats(db, [...addresses], () => null);
+  const exists = db.prepare("SELECT 1 FROM bot_contracts WHERE address = ?");
+  const upsert = db.prepare(
+    `INSERT INTO bot_contracts (address, reason, since_block, updated_block) VALUES (?, ?, ?, ?)
+     ON CONFLICT(address) DO UPDATE SET reason = excluded.reason, updated_block = excluded.updated_block`,
+  );
+  const del = db.prepare("DELETE FROM bot_contracts WHERE address = ?");
+  return db.transaction(() => {
+    let added = 0;
+    let removed = 0;
+    for (const [a, s] of stats) {
+      if (s.verdict === "bots") {
+        if (!exists.get(a)) added++;
+        upsert.run(a, s.reason, blockNumber, blockNumber);
+      } else if (s.verdict === "users") {
+        removed += Number(del.run(a).changes);
+      }
+    }
+    removed += Number(
+      db.prepare("DELETE FROM bot_contracts WHERE address NOT IN (SELECT DISTINCT address FROM contract_senders)").run().changes,
+    );
+    const total = (db.prepare("SELECT COUNT(*) AS n FROM bot_contracts").get() as { n: number }).n;
+    return { added, removed, total };
+  })();
+}
+
+/** Every contract in bot_contracts, newest mark first. */
+export function listBotContracts(db: Db): BotContract[] {
+  return (
+    db.prepare("SELECT address, reason, since_block, updated_block FROM bot_contracts ORDER BY since_block DESC, address").all() as {
+      address: string;
+      reason: string;
+      since_block: number;
+      updated_block: number;
+    }[]
+  ).map((r) => ({ address: r.address, reason: r.reason, sinceBlock: r.since_block, updatedBlock: r.updated_block }));
+}
+
+/** The hand-kept list plus bot_contracts, lowercase. */
+export function infraAddresses(db: Db): Set<string> {
+  const out = new Set<string>();
+  for (const r of db.prepare("SELECT address FROM bot_contracts").all() as { address: string }[]) out.add(r.address);
+  for (const a of INFRA_ADDRESSES) out.add(a);
+  return out;
+}
+
+/** The tag for a contract on the hand-kept list or in bot_contracts (null when on neither). */
+export function infraTagFor(db: Db, address: string | null | undefined): InfraTag | null {
+  if (!address) return null;
+  const listed = infraTagOf(address);
+  if (listed) return listed;
+  const r = db.prepare("SELECT reason FROM bot_contracts WHERE address = ?").get(address.toLowerCase()) as { reason: string } | undefined;
+  return r ? botInfraTag(r.reason) : null;
 }

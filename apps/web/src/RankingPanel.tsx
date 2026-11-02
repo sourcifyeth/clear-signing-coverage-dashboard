@@ -51,8 +51,9 @@ const VERDICT_LABEL: Record<CallerStats["verdict"], { cls: string; text: string 
 
 /**
  * Who sends the calls: the ERC-7730 target study's signal over the last
- * (up to) 600 calls. A hint only; the "Bots & infra" exclusion is still the
- * hand-kept list.
+ * (up to) 600 calls. The follower puts the "Bot-like" contracts in the
+ * server's bots & infrastructure set, so the "Bots & infra" exclusion
+ * removes them too.
  */
 function CallersCell({ c }: { c: CallerStats | null | undefined }) {
   if (c === undefined) return null;
@@ -168,8 +169,8 @@ export function RankingPanel({
       </div>
       <p className="muted small">
         Every contract called in the window, most transactions first. ✅ the function has an ERC-7730
-        descriptor in the current registry, ❌ it does not. Callers: who sent the last 600 calls, a hint for
-        spotting bots and infrastructure (hover for the numbers).
+        descriptor in the current registry, ❌ it does not. Callers: who sent the last 600 calls (hover for the numbers);
+        🤖 Bot-like contracts are counted as bots & infrastructure.
         {excluding && " Excluded kinds (see the control row above) are left out."}
         {data && (
           <>

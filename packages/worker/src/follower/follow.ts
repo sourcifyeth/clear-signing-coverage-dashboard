@@ -11,7 +11,8 @@
  * or value), and per-block `block_groups` aggregates that the rolling-window
  * stats sum over. For the busiest contracts it also records the sender of
  * each call in `contract_senders` (the last 600 per contract), for the
- * caller statistics.
+ * caller statistics; every 100 blocks it marks the bot-like ones in
+ * `bot_contracts`, which the bots & infrastructure exclusion removes.
  *
  * Reorgs: each new block's parentHash is checked against the stored hash of
  * block n-1. On mismatch the follower walks back (up to REORG_DEPTH blocks)
@@ -55,6 +56,7 @@ import {
   trackedContracts,
   insertSenders,
   trimSenders,
+  updateBotContracts,
   TRACKED_CONTRACTS,
   blockHash,
   latestBlock,
@@ -269,8 +271,14 @@ async function main(): Promise<void> {
         const oldest = (db.prepare("SELECT MIN(number) AS n FROM blocks").get() as { n: number | null }).n;
         const t1 = Date.now();
         const trimmed = trimSenders(db, tracked, oldest);
+        // Mark or unmark bots from the senders just trimmed to the sample;
+        // the exclusion reads bot_contracts (see @ccd/db senders.ts).
+        const bots = updateBotContracts(db, tracked, next - 1);
         tracked = trackedContracts(db, SENDER_TRACK);
-        log(`follower: senders trimmed by ${trimmed} rows in ${Date.now() - t1} ms; recording ${tracked.size} contracts`);
+        log(
+          `follower: senders trimmed by ${trimmed} rows; bot contracts +${bots.added} -${bots.removed} = ${bots.total}; ` +
+            `${Date.now() - t1} ms; recording ${tracked.size} contracts`,
+        );
         // Fold the write-ahead log back into the main file and truncate it.
         // The automatic checkpoint cannot complete while the API holds a long
         // read, so the log grew to a gigabyte; this one runs between blocks.

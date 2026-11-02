@@ -5,7 +5,11 @@
  * shown to nobody, so the dashboard can leave their calls out of the
  * question it answers (`exclude=infra`, off by default in the web app).
  *
- * The list is maintained by hand. Source: the ERC-7730 target study of
+ * The list below is maintained by hand. The follower adds to it at run time:
+ * a busy contract whose recorded callers look like bots (senders.ts) goes in
+ * the table bot_contracts, and the exclusion removes it too (infraInSql).
+ *
+ * Source of the hand-kept list: the ERC-7730 target study of
  * 2026-10-16 (the 40 busiest mainnet contracts, each read against its source,
  * selector traffic and callers; see the README). To add a contract, append an
  * entry here with a one-line reason and the source; no database change is
@@ -24,7 +28,9 @@ export type InfraKind =
   | "relay"
   | "messaging"
   | "automation"
-  | "undetermined";
+  | "undetermined"
+  /** not on the list: marked from its callers by the follower (senders.ts) */
+  | "auto-callers";
 
 export interface InfraContract {
   /** lowercase 0x address, mainnet */
@@ -45,6 +51,7 @@ export const INFRA_KIND_LABEL: Record<InfraKind, string> = {
   messaging: "cross-chain messaging infrastructure",
   automation: "automation helper",
   undetermined: "undetermined",
+  "auto-callers": "bot-like callers, detected automatically",
 };
 
 const STUDY = "ERC-7730 target study, 2026-10-16";
@@ -207,6 +214,20 @@ export const INFRA_ADDRESSES: ReadonlySet<string> = new Set(BY_ADDRESS.keys());
 
 /** SQL literal list of the addresses, for `to_address NOT IN (...)`. */
 export const INFRA_ADDRESSES_SQL = [...INFRA_ADDRESSES].map((a) => `'${a}'`).join(",");
+
+/**
+ * SQL condition: `expr` is on the hand-kept list, or the follower marked it as
+ * a bot from its callers (table bot_contracts, see senders.ts). Every query
+ * of the bots & infrastructure exclusion goes through this.
+ */
+export function infraInSql(expr: string): string {
+  return `(${expr} IN (${INFRA_ADDRESSES_SQL}) OR ${expr} IN (SELECT address FROM bot_contracts))`;
+}
+
+/** The tag of a contract that the caller statistics marked as a bot. */
+export function botInfraTag(reason: string): InfraTag {
+  return { name: "Bot-like callers (detected automatically)", kind: "auto-callers", reason };
+}
 
 /** The entry for an address, or null when it is not listed. */
 export function infraOf(address: string | null | undefined): InfraContract | null {

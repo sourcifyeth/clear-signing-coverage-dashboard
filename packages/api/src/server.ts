@@ -42,6 +42,7 @@ import express from "express";
 import cors from "cors";
 import {
   openDb,
+  listBotContracts,
   defaultDbPath,
   listRuns,
   readReport,
@@ -138,12 +139,13 @@ app.get("/api/live/latest", (_req, res) => {
   res.json({ latest: latestBlock(db), blocks: liveBlockCount(db), registryCommit: registryCommit(db) });
 });
 
-// The bots & infrastructure list (`exclude=infra`): the contracts no end user
-// signs a transaction to, with the reason for each. Static; maintained in
-// @ccd/db infra.ts.
+// The bots & infrastructure exclusion (`exclude=infra`): the contracts no end
+// user signs a transaction to, with the reason for each. `contracts` is the
+// hand-kept list in @ccd/db infra.ts; `detected` is the follower's
+// bot_contracts table, marked from the callers (@ccd/db senders.ts).
 app.get("/api/live/infra", (_req, res) => {
-  res.set("Cache-Control", "public, max-age=600");
-  res.json({ kinds: INFRA_KIND_LABEL, contracts: INFRA_CONTRACTS });
+  res.set("Cache-Control", "public, max-age=60");
+  res.json({ kinds: INFRA_KIND_LABEL, contracts: INFRA_CONTRACTS, detected: listBotContracts(db) });
 });
 
 // Per-block breakdown for the newest blocks (oldest first).

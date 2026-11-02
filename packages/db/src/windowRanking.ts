@@ -28,7 +28,8 @@ import type { Db } from "./index.js";
 import type { Bucket } from "./write.js";
 import { pct, downsampleCurve, type RankedContract } from "./ranking.js";
 import { STANDARD_TOKEN_SELECTORS, LIVE_CHAIN_ID, type ExcludeOptions } from "./selectors.js";
-import { INFRA_ADDRESSES, INFRA_ADDRESSES_SQL } from "./infra.js";
+import { infraInSql } from "./infra.js";
+import { infraAddresses } from "./senders.js";
 import { WINDOW_KEYS, windowMeta, windowCounters, rebuildWindows, type WindowKey } from "./windows.js";
 
 /** How many top contracts the stored row carries; the summary's `limit` is capped here. */
@@ -95,23 +96,22 @@ interface InfraCounts {
 }
 
 /**
- * The listed contracts' rows of a window, grouped by (bucket, status). The
- * list is about 20 addresses and window_groups is indexed by (window,
- * to_address), so this is a handful of index lookups; no running counter is
- * kept for it.
+ * The bots & infrastructure contracts' rows of a window (the hand-kept list
+ * and bot_contracts), grouped by (bucket, status). That is a few dozen
+ * addresses and window_groups is indexed by (window, to_address), so this is
+ * a set of index lookups; no running counter is kept for it.
  */
 export function infraWindowCounts(db: Db, key: WindowKey): Map<string, InfraCounts> {
   const out = new Map<string, InfraCounts>();
-  if (INFRA_ADDRESSES.size === 0) return out;
   const unverified = new Set(
     (
       db
-        .prepare(`SELECT address FROM contracts WHERE chain_id = ${LIVE_CHAIN_ID} AND verified = 0 AND address IN (${INFRA_ADDRESSES_SQL})`)
+        .prepare(`SELECT address FROM contracts WHERE chain_id = ${LIVE_CHAIN_ID} AND verified = 0 AND ${infraInSql("address")}`)
         .all() as { address: string }[]
     ).map((r) => r.address),
   );
   const rows = db
-    .prepare(`SELECT to_address, selector, bucket, status, tx_count FROM window_groups WHERE window = ? AND to_address IN (${INFRA_ADDRESSES_SQL})`)
+    .prepare(`SELECT to_address, selector, bucket, status, tx_count FROM window_groups WHERE window = ? AND ${infraInSql("to_address")}`)
     .all(key) as { to_address: string; selector: string; bucket: string; status: string; tx_count: number }[];
   for (const r of rows) {
     const k = `${r.bucket}|${r.status}`;
@@ -276,8 +276,9 @@ export function computeWindowRanking(db: Db, key: WindowKey): StoredRanking {
   }
 
   const variants = {} as Record<RankingVariant, StoredRankingVariant>;
+  const infra = infraAddresses(db);
   for (const v of VARIANTS) {
-    const kept = rows.filter((r) => (!v.unverified || r.verified !== 0) && (!v.infra || !INFRA_ADDRESSES.has(r.to_address)));
+    const kept = rows.filter((r) => (!v.unverified || r.verified !== 0) && (!v.infra || !infra.has(r.to_address)));
     variants[v.key] = walk(db, key, kept, v.unverified, v.infra);
   }
 
